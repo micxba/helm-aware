@@ -114,8 +114,8 @@ def get_helm_charts():
         logger.info("Fetching Helm charts from ArgoCD...")
         
         # Get all Applications and ApplicationSets
-        applications = ArgoCDService().get_applications()
-        application_sets = ArgoCDService().get_application_sets()
+        applications = ArgoCDService().get_all_applications()
+        application_sets = ArgoCDService().get_all_application_sets()
         
         logger.info(f"Found {len(applications)} Applications and {len(application_sets)} ApplicationSets")
         
