@@ -1,0 +1,23 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: helm-aware
+
+namespace: helm-aware
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - service-account.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+commonLabels:
+  app: helm-aware
+  version: v1.0.0
+
+images:
+  - name: helm-aware
+    newTag: latest 

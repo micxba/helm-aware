@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: helm-aware
+  labels:
+    name: helm-aware
+    app: helm-aware 

@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helm Aware - ArgoCD Chart Analysis</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .version-dropdown {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.375rem;
+            padding: 0.5rem;
+            font-size: 0.875rem;
+        }
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Header -->
+    <header class="gradient-bg text-white shadow-lg">
+        <div class="container mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-ship text-2xl"></i>
+                    <h1 class="text-2xl font-bold">Helm Aware</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button id="refreshBtn" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-4 py-2 rounded-lg transition-all duration-200">
+                        <i class="fas fa-sync-alt mr-2"></i>Refresh
+                    </button>
+                    <div id="statusIndicator" class="flex items-center space-x-2">
+                        <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                        <span class="text-sm">Connected</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-6 py-8">
+        <!-- Loading State -->
+        <div id="loadingState" class="flex items-center justify-center py-12">
+            <div class="text-center">
+                <div class="loading-spinner mx-auto mb-4"></div>
+                <p class="text-gray-600">Analyzing ArgoCD Applications and ApplicationSets...</p>
+            </div>
+        </div>
+
+        <!-- Error State -->
+        <div id="errorState" class="hidden bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
+            <div class="flex items-center">
+                <i class="fas fa-exclamation-triangle text-red-500 mr-3"></i>
+                <div>
+                    <h3 class="text-red-800 font-semibold">Error Loading Data</h3>
+                    <p id="errorMessage" class="text-red-600 mt-1"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div id="statsSection" class="hidden grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow-md p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="p-3 bg-blue-100 rounded-lg">
+                        <i class="fas fa-rocket text-blue-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Applications</p>
+                        <p id="appCount" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-md p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="p-3 bg-purple-100 rounded-lg">
+                        <i class="fas fa-layer-group text-purple-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Application Sets</p>
+                        <p id="appSetCount" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-md p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="p-3 bg-green-100 rounded-lg">
+                        <i class="fas fa-ship text-green-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Helm Charts</p>
+                        <p id="chartCount" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-md p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="p-3 bg-yellow-100 rounded-lg">
+                        <i class="fas fa-arrow-up text-yellow-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Updates Available</p>
+                        <p id="updateCount" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div id="tabsSection" class="hidden mb-6">
+            <div class="border-b border-gray-200">
+                <nav class="-mb-px flex space-x-8">
+                    <button id="applicationsTab" class="tab-button border-b-2 border-blue-500 py-2 px-1 text-sm font-medium text-blue-600">
+                        Applications
+                    </button>
+                    <button id="applicationSetsTab" class="tab-button border-b-2 border-transparent py-2 px-1 text-sm font-medium text-gray-500 hover:text-gray-700">
+                        Application Sets
+                    </button>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Applications Table -->
+        <div id="applicationsSection" class="hidden">
+            <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">ArgoCD Applications</h2>
+                    <p class="text-sm text-gray-600 mt-1">Applications with Helm chart analysis</p>
+                </div>
+                <div class="table-container">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Application</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Repository</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chart Name</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Version</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Available Versions</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="applicationsTableBody" class="bg-white divide-y divide-gray-200">
+                            <!-- Table rows will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Application Sets Table -->
+        <div id="applicationSetsSection" class="hidden">
+            <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">ArgoCD Application Sets</h2>
+                    <p class="text-sm text-gray-600 mt-1">Application Sets with Helm chart analysis</p>
+                </div>
+                <div class="table-container">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Application Set</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Repository</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chart Name</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Version</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Available Versions</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="applicationSetsTableBody" class="bg-white divide-y divide-gray-200">
+                            <!-- Table rows will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="hidden text-center py-12">
+            <i class="fas fa-ship text-gray-400 text-6xl mb-4"></i>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">No Helm Charts Found</h3>
+            <p class="text-gray-600">No ArgoCD Applications or ApplicationSets with Helm charts were found in your cluster.</p>
+        </div>
+    </main>
+
+    <script>
+        class HelmAwareApp {
+            constructor() {
+                this.currentTab = 'applications';
+                this.data = { applications: [], application_sets: [] };
+                this.init();
+            }
+
+            init() {
+                this.bindEvents();
+                this.loadData();
+            }
+
+            bindEvents() {
+                document.getElementById('refreshBtn').addEventListener('click', () => {
+                    this.loadData();
+                });
+
+                document.getElementById('applicationsTab').addEventListener('click', () => {
+                    this.switchTab('applications');
+                });
+
+                document.getElementById('applicationSetsTab').addEventListener('click', () => {
+                    this.switchTab('applicationSets');
+                });
+            }
+
+            async loadData() {
+                this.showLoading();
+                this.hideError();
+
+                try {
+                    const response = await fetch('/api/applications');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    this.data = await response.json();
+                    this.renderData();
+                } catch (error) {
+                    console.error('Error loading data:', error);
+                    this.showError(error.message);
+                } finally {
+                    this.hideLoading();
+                }
+            }
+
+            renderData() {
+                const totalApps = this.data.applications.length;
+                const totalAppSets = this.data.application_sets.length;
+                const totalCharts = this.countTotalCharts();
+                const updatesAvailable = this.countUpdatesAvailable();
+
+                // Update statistics
+                document.getElementById('appCount').textContent = totalApps;
+                document.getElementById('appSetCount').textContent = totalAppSets;
+                document.getElementById('chartCount').textContent = totalCharts;
+                document.getElementById('updateCount').textContent = updatesAvailable;
+
+                // Show/hide sections
+                if (totalApps === 0 && totalAppSets === 0) {
+                    this.showEmptyState();
+                } else {
+                    this.hideEmptyState();
+                    this.showStats();
+                    this.showTabs();
+                    this.renderTables();
+                }
+            }
+
+            countTotalCharts() {
+                let count = 0;
+                this.data.applications.forEach(app => {
+                    count += (app.helm_charts || []).length;
+                });
+                this.data.application_sets.forEach(appSet => {
+                    count += (appSet.helm_charts || []).length;
+                });
+                return count;
+            }
+
+            countUpdatesAvailable() {
+                let count = 0;
+                [...this.data.applications, ...this.data.application_sets].forEach(resource => {
+                    (resource.helm_charts || []).forEach(chart => {
+                        if (chart.available_versions && chart.available_versions.length > 0) {
+                            const latestVersion = chart.available_versions[0];
+                            if (latestVersion !== chart.chart_version) {
+                                count++;
+                            }
+                        }
+                    });
+                });
+                return count;
+            }
+
+            renderTables() {
+                this.renderApplicationsTable();
+                this.renderApplicationSetsTable();
+                this.switchTab(this.currentTab);
+            }
+
+            renderApplicationsTable() {
+                const tbody = document.getElementById('applicationsTableBody');
+                tbody.innerHTML = '';
+
+                this.data.applications.forEach(app => {
+                    const helmCharts = app.helm_charts || [];
+                    
+                    if (helmCharts.length === 0) {
+                        // Show app without charts
+                        this.addTableRow(tbody, app, null);
+                    } else {
+                        // Show app with each chart
+                        helmCharts.forEach(chart => {
+                            this.addTableRow(tbody, app, chart);
+                        });
+                    }
+                });
+            }
+
+            renderApplicationSetsTable() {
+                const tbody = document.getElementById('applicationSetsTableBody');
+                tbody.innerHTML = '';
+
+                this.data.application_sets.forEach(appSet => {
+                    const helmCharts = appSet.helm_charts || [];
+                    
+                    if (helmCharts.length === 0) {
+                        // Show app set without charts
+                        this.addTableRow(tbody, appSet, null);
+                    } else {
+                        // Show app set with each chart
+                        helmCharts.forEach(chart => {
+                            this.addTableRow(tbody, appSet, chart);
+                        });
+                    }
+                });
+            }
+
+            addTableRow(tbody, resource, chart) {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50';
+
+                const name = resource.metadata?.name || 'Unknown';
+                const namespace = resource.metadata?.namespace || 'N/A';
+                const repoUrl = chart?.repo_url || 'N/A';
+                const chartName = chart?.chart_name || 'N/A';
+                const currentVersion = chart?.chart_version || 'N/A';
+                const availableVersions = chart?.available_versions || [];
+
+                const isUpdateAvailable = availableVersions.length > 0 && 
+                                        availableVersions[0] !== currentVersion;
+
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0 h-10 w-10">
+                                <div class="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                                    <i class="fas fa-rocket text-blue-600"></i>
+                                </div>
+                            </div>
+                            <div class="ml-4">
+                                <div class="text-sm font-medium text-gray-900">${name}</div>
+                                <div class="text-sm text-gray-500">${resource.kind}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${namespace}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div class="max-w-xs truncate" title="${repoUrl}">${repoUrl}</div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${chartName}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${currentVersion}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        ${this.renderVersionDropdown(availableVersions, currentVersion)}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        ${this.renderStatusBadge(isUpdateAvailable)}
+                    </td>
+                `;
+
+                tbody.appendChild(row);
+            }
+
+            renderVersionDropdown(versions, currentVersion) {
+                if (versions.length === 0) {
+                    return '<span class="text-gray-400">No versions available</span>';
+                }
+
+                const latestVersion = versions[0];
+                const isUpdateAvailable = latestVersion !== currentVersion;
+
+                let options = '';
+                versions.forEach(version => {
+                    const isLatest = version === latestVersion;
+                    const isCurrent = version === currentVersion;
+                    const optionText = isLatest ? `${version} (Latest)` : version;
+                    const selected = isLatest ? 'selected' : '';
+                    options += `<option value="${version}" ${selected}>${optionText}</option>`;
+                });
+
+                return `
+                    <select class="version-dropdown ${isUpdateAvailable ? 'border-yellow-300 bg-yellow-50' : ''}" 
+                            ${isUpdateAvailable ? 'title="Update available"' : ''}>
+                        ${options}
+                    </select>
+                `;
+            }
+
+            renderStatusBadge(isUpdateAvailable) {
+                if (isUpdateAvailable) {
+                    return `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            <i class="fas fa-arrow-up mr-1"></i>
+                            Update Available
+                        </span>
+                    `;
+                } else {
+                    return `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <i class="fas fa-check mr-1"></i>
+                            Up to Date
+                        </span>
+                    `;
+                }
+            }
+
+            switchTab(tab) {
+                this.currentTab = tab;
+                
+                // Update tab buttons
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('border-blue-500', 'text-blue-600');
+                    btn.classList.add('border-transparent', 'text-gray-500');
+                });
+
+                if (tab === 'applications') {
+                    document.getElementById('applicationsTab').classList.add('border-blue-500', 'text-blue-600');
+                    document.getElementById('applicationsSection').classList.remove('hidden');
+                    document.getElementById('applicationSetsSection').classList.add('hidden');
+                } else {
+                    document.getElementById('applicationSetsTab').classList.add('border-blue-500', 'text-blue-600');
+                    document.getElementById('applicationSetsSection').classList.remove('hidden');
+                    document.getElementById('applicationsSection').classList.add('hidden');
+                }
+            }
+
+            showLoading() {
+                document.getElementById('loadingState').classList.remove('hidden');
+            }
+
+            hideLoading() {
+                document.getElementById('loadingState').classList.add('hidden');
+            }
+
+            showError(message) {
+                document.getElementById('errorMessage').textContent = message;
+                document.getElementById('errorState').classList.remove('hidden');
+            }
+
+            hideError() {
+                document.getElementById('errorState').classList.add('hidden');
+            }
+
+            showStats() {
+                document.getElementById('statsSection').classList.remove('hidden');
+            }
+
+            showTabs() {
+                document.getElementById('tabsSection').classList.remove('hidden');
+            }
+
+            showEmptyState() {
+                document.getElementById('emptyState').classList.remove('hidden');
+            }
+
+            hideEmptyState() {
+                document.getElementById('emptyState').classList.add('hidden');
+            }
+        }
+
+        // Initialize the application when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            new HelmAwareApp();
+        });
+    </script>
+</body>
+</html> 
