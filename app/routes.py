@@ -2,6 +2,9 @@ from flask import Blueprint, render_template, jsonify, request
 from app.services.argocd_service import ArgoCDService
 from app.services.helm_service import HelmService
 import logging
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 
 logger = logging.getLogger(__name__)
 
@@ -15,64 +18,95 @@ def index():
 @main_bp.route('/api/applications')
 def get_applications():
     """Get all ArgoCD Applications and ApplicationSets with Helm chart analysis"""
-    logger.info("API: Starting applications analysis request")
+    logger.info("=== API: Starting applications analysis request ===")
+    
     try:
-        logger.debug("Initializing services...")
+        # Step 1: Initialize services
+        logger.info("Step 1: Initializing services...")
         argocd_service = ArgoCDService()
         helm_service = HelmService()
+        logger.info("✅ Services initialized successfully")
         
-        # Get all applications and application sets
-        logger.info("Fetching ArgoCD resources...")
+        # Step 2: Fetch ArgoCD resources (local data only)
+        logger.info("Step 2: Fetching ArgoCD resources from cluster...")
+        start_time = time.time()
+        
         applications = argocd_service.get_all_applications()
         application_sets = argocd_service.get_all_application_sets()
         
-        logger.info(f"Processing {len(applications)} applications and {len(application_sets)} application sets")
+        fetch_time = time.time() - start_time
+        logger.info(f"✅ Fetched {len(applications)} applications and {len(application_sets)} application sets in {fetch_time:.2f}s")
         
-        # Analyze Helm charts in applications
-        logger.debug("Analyzing Helm charts in applications...")
+        # Step 3: Analyze Helm charts in local data
+        logger.info("Step 3: Analyzing Helm charts in local data...")
+        start_time = time.time()
+        
+        total_charts = 0
+        
+        # Process applications
+        logger.info(f"Processing {len(applications)} applications...")
         for i, app in enumerate(applications):
-            logger.debug(f"Processing application {i+1}/{len(applications)}: {app.get('metadata', {}).get('name', 'unknown')}")
+            app_name = app.get('metadata', {}).get('name', f'app-{i}')
+            logger.info(f"  Processing application {i+1}/{len(applications)}: {app_name}")
+            
             app['helm_charts'] = helm_service.analyze_helm_charts(app)
-            logger.debug(f"Found {len(app['helm_charts'])} Helm charts in application")
+            chart_count = len(app['helm_charts'])
+            total_charts += chart_count
+            logger.info(f"    Found {chart_count} Helm charts")
             
-            # Get available versions for each chart
-            for j, chart in enumerate(app['helm_charts']):
-                logger.debug(f"Getting versions for chart {j+1}/{len(app['helm_charts'])}: {chart['chart_name']}")
-                chart['available_versions'] = helm_service.get_available_versions(chart)
-                logger.debug(f"Found {len(chart['available_versions'])} available versions")
+            # Initialize empty versions for now
+            for chart in app['helm_charts']:
+                chart['available_versions'] = []
+                chart['version_fetch_status'] = 'pending'
         
-        # Analyze Helm charts in application sets
-        logger.debug("Analyzing Helm charts in application sets...")
+        # Process application sets
+        logger.info(f"Processing {len(application_sets)} application sets...")
         for i, app_set in enumerate(application_sets):
-            logger.debug(f"Processing application set {i+1}/{len(application_sets)}: {app_set.get('metadata', {}).get('name', 'unknown')}")
-            app_set['helm_charts'] = helm_service.analyze_helm_charts(app_set)
-            logger.debug(f"Found {len(app_set['helm_charts'])} Helm charts in application set")
+            app_set_name = app_set.get('metadata', {}).get('name', f'appset-{i}')
+            logger.info(f"  Processing application set {i+1}/{len(application_sets)}: {app_set_name}")
             
-            # Get available versions for each chart
-            for j, chart in enumerate(app_set['helm_charts']):
-                logger.debug(f"Getting versions for chart {j+1}/{len(app_set['helm_charts'])}: {chart['chart_name']}")
-                chart['available_versions'] = helm_service.get_available_versions(chart)
-                logger.debug(f"Found {len(chart['available_versions'])} available versions")
+            app_set['helm_charts'] = helm_service.analyze_helm_charts(app_set)
+            chart_count = len(app_set['helm_charts'])
+            total_charts += chart_count
+            logger.info(f"    Found {chart_count} Helm charts")
+            
+            # Initialize empty versions for now
+            for chart in app_set['helm_charts']:
+                chart['available_versions'] = []
+                chart['version_fetch_status'] = 'pending'
         
-        logger.info("Analysis complete, returning response")
-        return jsonify({
+        analysis_time = time.time() - start_time
+        logger.info(f"✅ Local analysis complete: {total_charts} total charts found in {analysis_time:.2f}s")
+        
+        # Step 4: Return local data immediately
+        logger.info("Step 4: Returning local data to frontend...")
+        response_data = {
             'applications': applications,
-            'application_sets': application_sets
-        })
+            'application_sets': application_sets,
+            'local_analysis_complete': True,
+            'total_charts_found': total_charts
+        }
+        
+        logger.info("✅ Returning response with local data")
+        return jsonify(response_data)
+        
     except Exception as e:
-        logger.error(f"Error in get_applications: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"❌ Critical error in get_applications: {e}", exc_info=True)
+        return jsonify({
+            'error': f'Failed to load applications: {str(e)}',
+            'local_analysis_complete': False
+        }), 500
 
 @main_bp.route('/api/chart-versions', methods=['POST'])
 def get_chart_versions():
     """Get available versions for a specific chart"""
-    logger.info("API: Chart versions request received")
+    logger.info("=== API: Chart versions request received ===")
     try:
         data = request.get_json()
         repo_url = data.get('repo_url')
         chart_name = data.get('chart_name')
         
-        logger.debug(f"Getting versions for chart: {chart_name} from {repo_url}")
+        logger.info(f"Fetching versions for chart: {chart_name} from {repo_url}")
         
         helm_service = HelmService()
         versions = helm_service.get_available_versions({
@@ -80,8 +114,70 @@ def get_chart_versions():
             'chart_name': chart_name
         })
         
-        logger.info(f"Found {len(versions)} versions for {chart_name}")
+        logger.info(f"✅ Found {len(versions)} versions for {chart_name}")
         return jsonify({'versions': versions})
     except Exception as e:
-        logger.error(f"Error in get_chart_versions: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500 
+        logger.error(f"❌ Error in get_chart_versions: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/fetch-all-versions', methods=['POST'])
+def fetch_all_versions():
+    """Fetch versions for all charts asynchronously"""
+    logger.info("=== API: Starting async version fetch for all charts ===")
+    
+    try:
+        data = request.get_json()
+        charts = data.get('charts', [])
+        
+        logger.info(f"Received {len(charts)} charts to fetch versions for")
+        
+        results = []
+        helm_service = HelmService()
+        
+        # Process charts with timeout
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_chart = {}
+            
+            for chart in charts:
+                future = executor.submit(helm_service.get_available_versions, chart)
+                future_to_chart[future] = chart
+            
+            # Wait for completion with timeout
+            for future in as_completed(future_to_chart, timeout=60):
+                chart = future_to_chart[future]
+                try:
+                    versions = future.result(timeout=10)
+                    results.append({
+                        'chart_id': chart.get('chart_id'),
+                        'versions': versions,
+                        'status': 'success'
+                    })
+                    logger.info(f"✅ Fetched {len(versions)} versions for {chart['chart_name']}")
+                except TimeoutError:
+                    logger.warning(f"⏰ Timeout fetching versions for {chart['chart_name']}")
+                    results.append({
+                        'chart_id': chart.get('chart_id'),
+                        'versions': [],
+                        'status': 'timeout'
+                    })
+                except Exception as e:
+                    logger.error(f"❌ Error fetching versions for {chart['chart_name']}: {e}")
+                    results.append({
+                        'chart_id': chart.get('chart_id'),
+                        'versions': [],
+                        'status': 'error',
+                        'error': str(e)
+                    })
+        
+        logger.info(f"✅ Async version fetch complete: {len(results)} results")
+        return jsonify({'results': results})
+        
+    except Exception as e:
+        logger.error(f"❌ Error in fetch_all_versions: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@main_bp.route('/api/health')
+def health_check():
+    """Health check endpoint"""
+    logger.debug("Health check request")
+    return jsonify({'status': 'healthy', 'timestamp': time.time()}) 
