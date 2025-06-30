@@ -128,27 +128,101 @@ class HelmService:
         return chart_info
     
     def _is_helm_chart(self, source):
-        """Determine if a source is a Helm chart"""
+        """Determine if a source is a Helm chart with improved detection logic"""
         logger.debug(f"Checking if source is Helm chart: {source}")
         
-        # Check if chart field is present
-        if 'chart' in source:
-            logger.debug("Source has 'chart' field, is Helm chart")
-            return True
-        
-        # Check if it's an OCI repository (common for Helm charts)
         repo_url = source.get('repoURL', '')
-        if repo_url.startswith('oci://'):
-            logger.debug("Source has OCI protocol, is Helm chart")
-            return True
-        
-        # Check if targetRevision looks like a Helm version
+        chart = source.get('chart', '')
         target_revision = source.get('targetRevision', '')
-        if target_revision and re.match(r'^\d+\.\d+\.\d+', target_revision):
-            logger.debug(f"Source has version-like targetRevision: {target_revision}, is Helm chart")
+        path = source.get('path', '')
+        
+        # Rule 1: Must have a 'chart' field to be a Helm chart
+        if not chart:
+            logger.debug("No 'chart' field found - not a Helm chart")
+            return False
+        
+        # Rule 2: Check if it's a Git repository (not a Helm chart)
+        if self._is_git_repository(repo_url):
+            logger.debug(f"Git repository detected: {repo_url} - not a Helm chart")
+            return False
+        
+        # Rule 3: Check if it has a 'path' field (indicates Git-based deployment)
+        if path:
+            logger.debug(f"Path field found: {path} - indicates Git-based deployment, not Helm chart")
+            return False
+        
+        # Rule 4: Check if it's an OCI registry (common for Helm charts)
+        if repo_url.startswith('oci://'):
+            logger.debug("OCI registry detected - likely a Helm chart")
             return True
         
-        logger.debug("Source is not identified as Helm chart")
+        # Rule 5: Check if it's a Helm repository (HTTP/HTTPS)
+        if repo_url.startswith(('http://', 'https://')):
+            # Additional check: if it has a chart field and looks like a Helm repo
+            if self._looks_like_helm_repo(repo_url):
+                logger.debug("HTTP/HTTPS Helm repository detected")
+                return True
+            else:
+                logger.debug("HTTP/HTTPS repository but doesn't look like Helm repo")
+                return False
+        
+        # Rule 6: Check if targetRevision looks like a Helm version (semantic versioning)
+        if target_revision and re.match(r'^\d+\.\d+\.\d+', target_revision):
+            logger.debug(f"Target revision looks like Helm version: {target_revision}")
+            return True
+        
+        # Rule 7: If we have a chart name but no clear indicators, be conservative
+        if chart:
+            logger.debug(f"Chart field present but unclear if Helm chart: {chart}")
+            return False
+        
+        logger.debug("Source does not meet Helm chart criteria")
+        return False
+    
+    def _is_git_repository(self, repo_url):
+        """Check if the repository URL is a Git repository"""
+        if not repo_url:
+            return False
+        
+        # Git URL patterns
+        git_patterns = [
+            r'\.git$',  # Ends with .git
+            r'^git@',   # SSH Git URL
+            r'^git://', # Git protocol
+            r'github\.com',  # GitHub
+            r'gitlab\.com',  # GitLab
+            r'bitbucket\.org',  # Bitbucket
+            r'gitea\.',  # Gitea
+            r'gogs\.',   # Gogs
+        ]
+        
+        for pattern in git_patterns:
+            if re.search(pattern, repo_url, re.IGNORECASE):
+                return True
+        
+        return False
+    
+    def _looks_like_helm_repo(self, repo_url):
+        """Check if an HTTP/HTTPS URL looks like a Helm repository"""
+        if not repo_url:
+            return False
+        
+        # Common Helm repository patterns
+        helm_patterns = [
+            r'charts\.',  # charts.domain.com
+            r'helm\.',    # helm.domain.com
+            r'bitnami\.com',  # Bitnami charts
+            r'stable\.',  # Stable charts
+            r'incubator\.',  # Incubator charts
+            r'chartmuseum\.',  # ChartMuseum
+            r'charts\.bitnami\.com',  # Bitnami charts
+            r'charts\.helm\.sh',  # Helm charts
+        ]
+        
+        for pattern in helm_patterns:
+            if re.search(pattern, repo_url, re.IGNORECASE):
+                return True
+        
         return False
     
     def get_available_versions(self, chart_info):
