@@ -18,7 +18,7 @@ spec:
       serviceAccountName: helm-aware
       containers:
       - name: helm-aware
-        image: ghcr.io/micxba/helm-aware:2025-06-30-80d267fb-0672-4d35-b2c3-a2c54955e2e7
+        image: ghcr.io/micxba/helm-aware:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 5000

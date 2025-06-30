@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 import subprocess
 import tempfile
 import os
+from .cache_service import CacheService
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class HelmService:
         self.session.headers.update({
             'User-Agent': 'Helm-Aware/1.0'
         })
+        self.cache_service = CacheService()
         logger.info("HelmService initialized successfully")
     
     def analyze_helm_charts(self, resource):
@@ -134,7 +136,7 @@ class HelmService:
         return chart_info
     
     def _is_helm_chart(self, source, has_helm_config=False):
-        """Determine if a source is a Helm chart by checking for Helm-specific fields"""
+        """Determine if a source is a Helm chart - ONLY specific patterns allowed"""
         logger.debug(f"Checking if source is Helm chart: {source}")
         
         repo_url = source.get('repoURL', '')
@@ -151,27 +153,17 @@ class HelmService:
             logger.debug(f"Path field found: {path} - indicates Git-based deployment, not Helm chart")
             return False
         
-        # Rule 1: Check for Helm-specific fields in the source itself
-        if self._has_helm_fields_in_source(source):
-            logger.debug("Source has Helm-specific fields - is a Helm chart")
+        # Rule 1: Check for Helm-specific fields in the source itself (ONLY specific patterns)
+        if self._has_valid_helm_fields_in_source(source):
+            logger.debug("Source has valid Helm-specific fields - is a Helm chart")
             return True
         
-        # Rule 2: Check for Helm configuration in the parent Application/ApplicationSet
+        # Rule 2: Check for Helm configuration in the parent Application/ApplicationSet (ONLY specific patterns)
         if has_helm_config:
-            logger.debug("Parent has Helm configuration - is a Helm chart")
+            logger.debug("Parent has valid Helm configuration - is a Helm chart")
             return True
         
-        # Rule 3: Check for chart field with OCI registry
-        if chart and repo_url.startswith('oci://'):
-            logger.debug("Chart field with OCI registry - is a Helm chart")
-            return True
-        
-        # Rule 4: Check for chart field with known Helm repository patterns
-        if chart and self._looks_like_helm_repo(repo_url):
-            logger.debug("Chart field with Helm repository - is a Helm chart")
-            return True
-        
-        logger.debug("Source does not meet Helm chart criteria")
+        logger.debug("Source does not meet strict Helm chart criteria")
         return False
     
     def _has_helm_fields_in_source(self, source):
@@ -188,49 +180,155 @@ class HelmService:
         
         return False
     
+    def _has_valid_helm_fields_in_source(self, source):
+        """Check if the source has VALID Helm-specific fields (restrictive)"""
+        if 'helm' not in source:
+            return False
+        
+        helm_config = source['helm']
+        logger.debug(f"Checking Helm config in source: {helm_config}")
+        
+        # Pattern 1: valueFiles
+        if 'valueFiles' in helm_config:
+            logger.debug("Found valueFiles in Helm config - valid Helm chart")
+            return True
+        
+        # Pattern 2: valueObject
+        if 'valueObject' in helm_config:
+            logger.debug("Found valueObject in Helm config - valid Helm chart")
+            return True
+        
+        # Pattern 3: parameters
+        if 'parameters' in helm_config:
+            logger.debug("Found parameters in Helm config - valid Helm chart")
+            return True
+        
+        logger.debug("Helm config does not contain valid fields")
+        return False
+    
     def _has_helm_config_in_application(self, application):
-        """Check if the Application has Helm configuration"""
+        """Check if the Application has VALID Helm configuration (restrictive)"""
         spec = application.get('spec', {})
         
         # Check for Helm configuration in the spec
         if 'helm' in spec:
-            logger.debug("Application has Helm configuration in spec")
-            return True
+            helm_config = spec['helm']
+            logger.debug(f"Checking Helm config in application spec: {helm_config}")
+            
+            # Pattern 1: releaseName
+            if 'releaseName' in helm_config:
+                logger.debug("Found releaseName in application Helm config - valid Helm chart")
+                return True
+            
+            # Pattern 2: values
+            if 'values' in helm_config:
+                logger.debug("Found values in application Helm config - valid Helm chart")
+                return True
         
         # Check for Helm configuration in sources
         if 'source' in spec and 'helm' in spec['source']:
-            logger.debug("Application source has Helm configuration")
-            return True
+            helm_config = spec['source']['helm']
+            logger.debug(f"Checking Helm config in application source: {helm_config}")
+            
+            # Pattern 1: valueFiles
+            if 'valueFiles' in helm_config:
+                logger.debug("Found valueFiles in application source Helm config - valid Helm chart")
+                return True
+            
+            # Pattern 2: valueObject
+            if 'valueObject' in helm_config:
+                logger.debug("Found valueObject in application source Helm config - valid Helm chart")
+                return True
+            
+            # Pattern 3: parameters
+            if 'parameters' in helm_config:
+                logger.debug("Found parameters in application source Helm config - valid Helm chart")
+                return True
         
         if 'sources' in spec:
             for source in spec['sources']:
                 if 'helm' in source:
-                    logger.debug("Application has Helm configuration in sources")
-                    return True
+                    helm_config = source['helm']
+                    logger.debug(f"Checking Helm config in application sources: {helm_config}")
+                    
+                    # Pattern 1: valueFiles
+                    if 'valueFiles' in helm_config:
+                        logger.debug("Found valueFiles in application sources Helm config - valid Helm chart")
+                        return True
+                    
+                    # Pattern 2: valueObject
+                    if 'valueObject' in helm_config:
+                        logger.debug("Found valueObject in application sources Helm config - valid Helm chart")
+                        return True
+                    
+                    # Pattern 3: parameters
+                    if 'parameters' in helm_config:
+                        logger.debug("Found parameters in application sources Helm config - valid Helm chart")
+                        return True
         
         return False
     
     def _has_helm_config_in_application_set(self, application_set):
-        """Check if the ApplicationSet has Helm configuration"""
+        """Check if the ApplicationSet has VALID Helm configuration (restrictive)"""
         spec = application_set.get('spec', {})
         template = spec.get('template', {})
         template_spec = template.get('spec', {})
         
         # Check for Helm configuration in the template spec
         if 'helm' in template_spec:
-            logger.debug("ApplicationSet template has Helm configuration in spec")
-            return True
+            helm_config = template_spec['helm']
+            logger.debug(f"Checking Helm config in application set template spec: {helm_config}")
+            
+            # Pattern 1: releaseName
+            if 'releaseName' in helm_config:
+                logger.debug("Found releaseName in application set template Helm config - valid Helm chart")
+                return True
+            
+            # Pattern 2: values
+            if 'values' in helm_config:
+                logger.debug("Found values in application set template Helm config - valid Helm chart")
+                return True
         
         # Check for Helm configuration in template sources
         if 'source' in template_spec and 'helm' in template_spec['source']:
-            logger.debug("ApplicationSet template source has Helm configuration")
-            return True
+            helm_config = template_spec['source']['helm']
+            logger.debug(f"Checking Helm config in application set template source: {helm_config}")
+            
+            # Pattern 1: valueFiles
+            if 'valueFiles' in helm_config:
+                logger.debug("Found valueFiles in application set template source Helm config - valid Helm chart")
+                return True
+            
+            # Pattern 2: valueObject
+            if 'valueObject' in helm_config:
+                logger.debug("Found valueObject in application set template source Helm config - valid Helm chart")
+                return True
+            
+            # Pattern 3: parameters
+            if 'parameters' in helm_config:
+                logger.debug("Found parameters in application set template source Helm config - valid Helm chart")
+                return True
         
         if 'sources' in template_spec:
             for source in template_spec['sources']:
                 if 'helm' in source:
-                    logger.debug("ApplicationSet has Helm configuration in template sources")
-                    return True
+                    helm_config = source['helm']
+                    logger.debug(f"Checking Helm config in application set template sources: {helm_config}")
+                    
+                    # Pattern 1: valueFiles
+                    if 'valueFiles' in helm_config:
+                        logger.debug("Found valueFiles in application set template sources Helm config - valid Helm chart")
+                        return True
+                    
+                    # Pattern 2: valueObject
+                    if 'valueObject' in helm_config:
+                        logger.debug("Found valueObject in application set template sources Helm config - valid Helm chart")
+                        return True
+                    
+                    # Pattern 3: parameters
+                    if 'parameters' in helm_config:
+                        logger.debug("Found parameters in application set template sources Helm config - valid Helm chart")
+                        return True
         
         return False
     
@@ -299,21 +397,75 @@ class HelmService:
         return False
     
     def get_available_versions(self, chart_info):
-        """Get available versions for a Helm chart"""
+        """Get available versions for a Helm chart (with caching)"""
         logger.info(f"Getting available versions for chart: {chart_info['chart_name']} from {chart_info['repo_url']}")
+        
+        # Create a unique key for caching
+        chart_key = f"{chart_info['repo_url']}:{chart_info['chart_name']}"
+        
+        # Try to get cached versions first
+        cached_data = self.cache_service.get_cached_versions(chart_key)
+        if cached_data:
+            logger.info(f"Using cached versions for {chart_info['chart_name']}")
+            return cached_data.get('versions', [])
+        
+        # If not cached, fetch from remote
         try:
             repo_url = chart_info['repo_url']
             chart_name = chart_info['chart_name']
             
             if repo_url.startswith('oci://'):
                 logger.debug("Using OCI version fetching method")
-                return self._get_oci_versions(repo_url, chart_name)
+                versions = self._get_oci_versions(repo_url, chart_name)
             else:
                 logger.debug("Using HTTP version fetching method")
-                return self._get_http_versions(repo_url, chart_name)
+                versions = self._get_http_versions(repo_url, chart_name)
+            
+            # Cache the results
+            if versions:
+                self.cache_service.set_cached_versions(chart_key, versions)
+                logger.info(f"Cached {len(versions)} versions for {chart_info['chart_name']}")
+            
+            return versions
         except Exception as e:
             logger.error(f"Error getting versions for {chart_info}: {e}")
             return []
+    
+    def refresh_versions(self, chart_info):
+        """Force refresh versions for a specific chart"""
+        logger.info(f"Refreshing versions for chart: {chart_info['chart_name']} from {chart_info['repo_url']}")
+        
+        # Create a unique key for caching
+        chart_key = f"{chart_info['repo_url']}:{chart_info['chart_name']}"
+        
+        try:
+            repo_url = chart_info['repo_url']
+            chart_name = chart_info['chart_name']
+            
+            if repo_url.startswith('oci://'):
+                logger.debug("Using OCI version fetching method")
+                versions = self._get_oci_versions(repo_url, chart_name)
+            else:
+                logger.debug("Using HTTP version fetching method")
+                versions = self._get_http_versions(repo_url, chart_name)
+            
+            # Update cache with new results
+            if versions:
+                self.cache_service.set_cached_versions(chart_key, versions)
+                logger.info(f"Updated cache with {len(versions)} versions for {chart_info['chart_name']}")
+            
+            return versions
+        except Exception as e:
+            logger.error(f"Error refreshing versions for {chart_info}: {e}")
+            return []
+    
+    def get_cache_metadata(self):
+        """Get cache metadata"""
+        return self.cache_service.get_cache_metadata()
+    
+    def clear_cache(self):
+        """Clear all cached data"""
+        return self.cache_service.clear_cache()
     
     def _get_oci_versions(self, repo_url, chart_name):
         """Get versions from OCI registry"""

@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -12,8 +13,17 @@ main_bp = Blueprint('main', __name__)
 
 @main_bp.route('/')
 def index():
-    logger.info("Serving main page")
-    return render_template('index.html')
+    """Main page showing Helm chart analysis"""
+    try:
+        logger.info("Loading main page...")
+        
+        # Get cache metadata
+        cache_metadata = HelmService().get_cache_metadata()
+        
+        return render_template('index.html', cache_metadata=cache_metadata)
+    except Exception as e:
+        logger.error(f"Error loading main page: {e}")
+        return render_template('index.html', error=str(e))
 
 @main_bp.route('/api/applications')
 def get_applications():
@@ -97,28 +107,149 @@ def get_applications():
             'local_analysis_complete': False
         }), 500
 
-@main_bp.route('/api/chart-versions', methods=['POST'])
-def get_chart_versions():
-    """Get available versions for a specific chart"""
-    logger.info("=== API: Chart versions request received ===")
+@main_bp.route('/api/helm-charts')
+def get_helm_charts():
+    """API endpoint to get all Helm charts from ArgoCD Applications and ApplicationSets"""
     try:
-        data = request.get_json()
-        repo_url = data.get('repo_url')
-        chart_name = data.get('chart_name')
+        logger.info("Fetching Helm charts from ArgoCD...")
         
-        logger.info(f"Fetching versions for chart: {chart_name} from {repo_url}")
+        # Get all Applications and ApplicationSets
+        applications = ArgoCDService().get_applications()
+        application_sets = ArgoCDService().get_application_sets()
         
-        helm_service = HelmService()
-        versions = helm_service.get_available_versions({
-            'repo_url': repo_url,
-            'chart_name': chart_name
+        logger.info(f"Found {len(applications)} Applications and {len(application_sets)} ApplicationSets")
+        
+        all_helm_charts = []
+        
+        # Analyze Applications
+        for app in applications:
+            logger.debug(f"Analyzing Application: {app.get('metadata', {}).get('name', 'unknown')}")
+            helm_charts = HelmService().analyze_helm_charts(app)
+            for chart in helm_charts:
+                chart['resource_name'] = app.get('metadata', {}).get('name', 'unknown')
+                chart['resource_kind'] = 'Application'
+                chart['resource_namespace'] = app.get('metadata', {}).get('namespace', 'unknown')
+            all_helm_charts.extend(helm_charts)
+        
+        # Analyze ApplicationSets
+        for app_set in application_sets:
+            logger.debug(f"Analyzing ApplicationSet: {app_set.get('metadata', {}).get('name', 'unknown')}")
+            helm_charts = HelmService().analyze_helm_charts(app_set)
+            for chart in helm_charts:
+                chart['resource_name'] = app_set.get('metadata', {}).get('name', 'unknown')
+                chart['resource_kind'] = 'ApplicationSet'
+                chart['resource_namespace'] = app_set.get('metadata', {}).get('namespace', 'unknown')
+            all_helm_charts.extend(helm_charts)
+        
+        logger.info(f"Total Helm charts found: {len(all_helm_charts)}")
+        
+        return jsonify({
+            'success': True,
+            'helm_charts': all_helm_charts,
+            'total_count': len(all_helm_charts)
         })
         
-        logger.info(f"✅ Found {len(versions)} versions for {chart_name}")
-        return jsonify({'versions': versions})
     except Exception as e:
-        logger.error(f"❌ Error in get_chart_versions: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error fetching Helm charts: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@main_bp.route('/api/versions/<path:chart_key>')
+def get_chart_versions(chart_key):
+    """API endpoint to get available versions for a specific chart"""
+    try:
+        logger.info(f"Fetching versions for chart: {chart_key}")
+        
+        # Parse chart key (repo_url:chart_name)
+        if ':' not in chart_key:
+            return jsonify({'success': False, 'error': 'Invalid chart key format'}), 400
+        
+        repo_url, chart_name = chart_key.split(':', 1)
+        chart_info = {
+            'repo_url': repo_url,
+            'chart_name': chart_name
+        }
+        
+        versions = HelmService().get_available_versions(chart_info)
+        
+        return jsonify({
+            'success': True,
+            'versions': versions,
+            'latest_version': HelmService().get_latest_version(versions)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error fetching versions for {chart_key}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@main_bp.route('/api/refresh-versions/<path:chart_key>', methods=['POST'])
+def refresh_chart_versions(chart_key):
+    """API endpoint to refresh versions for a specific chart"""
+    try:
+        logger.info(f"Refreshing versions for chart: {chart_key}")
+        
+        # Parse chart key (repo_url:chart_name)
+        if ':' not in chart_key:
+            return jsonify({'success': False, 'error': 'Invalid chart key format'}), 400
+        
+        repo_url, chart_name = chart_key.split(':', 1)
+        chart_info = {
+            'repo_url': repo_url,
+            'chart_name': chart_name
+        }
+        
+        versions = HelmService().refresh_versions(chart_info)
+        
+        return jsonify({
+            'success': True,
+            'versions': versions,
+            'latest_version': HelmService().get_latest_version(versions),
+            'refreshed_at': datetime.utcnow().isoformat()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error refreshing versions for {chart_key}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@main_bp.route('/api/cache/metadata')
+def get_cache_metadata():
+    """API endpoint to get cache metadata"""
+    try:
+        metadata = HelmService().get_cache_metadata()
+        return jsonify({
+            'success': True,
+            'metadata': metadata
+        })
+    except Exception as e:
+        logger.error(f"Error getting cache metadata: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@main_bp.route('/api/cache/clear', methods=['POST'])
+def clear_cache():
+    """API endpoint to clear all cached data"""
+    try:
+        success = HelmService().clear_cache()
+        return jsonify({
+            'success': success,
+            'message': 'Cache cleared successfully' if success else 'Failed to clear cache'
+        })
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @main_bp.route('/api/fetch-all-versions', methods=['POST'])
 def fetch_all_versions():
