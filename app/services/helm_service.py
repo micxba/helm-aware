@@ -137,6 +137,20 @@ class HelmService:
         """Determine if a source is a Helm chart by checking for Helm-specific fields"""
         logger.debug(f"Checking if source is Helm chart: {source}")
         
+        repo_url = source.get('repoURL', '')
+        chart = source.get('chart', '')
+        path = source.get('path', '')
+        
+        # Early exit: If it's clearly a Git repository, it's not a Helm chart
+        if self._is_git_repository(repo_url):
+            logger.debug(f"Git repository detected: {repo_url} - not a Helm chart")
+            return False
+        
+        # Early exit: If it has a path field, it's likely a Git-based deployment (Kustomize, etc.)
+        if path:
+            logger.debug(f"Path field found: {path} - indicates Git-based deployment, not Helm chart")
+            return False
+        
         # Rule 1: Check for Helm-specific fields in the source itself
         if self._has_helm_fields_in_source(source):
             logger.debug("Source has Helm-specific fields - is a Helm chart")
@@ -148,9 +162,6 @@ class HelmService:
             return True
         
         # Rule 3: Check for chart field with OCI registry
-        repo_url = source.get('repoURL', '')
-        chart = source.get('chart', '')
-        
         if chart and repo_url.startswith('oci://'):
             logger.debug("Chart field with OCI registry - is a Helm chart")
             return True
@@ -251,20 +262,38 @@ class HelmService:
         if not repo_url:
             return False
         
-        # Git URL patterns
+        # Git URL patterns - more comprehensive
         git_patterns = [
             r'\.git$',  # Ends with .git
-            r'^git@',   # SSH Git URL
+            r'^git@',   # SSH Git URL (git@github.com:user/repo.git)
             r'^git://', # Git protocol
+            r'^ssh://', # SSH protocol
             r'github\.com',  # GitHub
             r'gitlab\.com',  # GitLab
+            r'gitlab\.',     # GitLab instances
             r'bitbucket\.org',  # Bitbucket
+            r'bitbucket\.',     # Bitbucket instances
             r'gitea\.',  # Gitea
             r'gogs\.',   # Gogs
+            r'azure\.com.*dev\.azure\.com',  # Azure DevOps
+            r'dev\.azure\.com',  # Azure DevOps
+            r'visualstudio\.com',  # Azure DevOps
+            r'codecommit\.',  # AWS CodeCommit
+            r'gerrit\.',  # Gerrit
+            r'phabricator\.',  # Phabricator
+            r'gitolite\.',  # Gitolite
+            r'gogs\.',  # Gogs
+            r'gitea\.',  # Gitea
+            r'codeberg\.org',  # Codeberg
+            r'sourceforge\.net',  # SourceForge
+            r'git\.',  # Generic git subdomain
+            r'\.git$',  # Ends with .git
+            r'^https?://.*\.git$',  # HTTPS/HTTP ending with .git
         ]
         
         for pattern in git_patterns:
             if re.search(pattern, repo_url, re.IGNORECASE):
+                logger.debug(f"Git repository pattern '{pattern}' matched: {repo_url}")
                 return True
         
         return False

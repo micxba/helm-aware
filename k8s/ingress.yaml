@@ -9,10 +9,12 @@ metadata:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    external-dns.alpha.kubernetes.io/target: "alljedis.justdied.com"
 spec:
-  ingressClassName: nginx
+  tls:
+    - hosts: helm-aware.sith.network
   rules:
-  - host: helm-aware.local  # Change this to your domain
+  - host: helm-aware.sith.network
     http:
       paths:
       - path: /
