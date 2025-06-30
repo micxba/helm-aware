@@ -3,369 +3,894 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Helm-Aware - ArgoCD Helm Chart Analysis</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <title>Helm Aware - ArgoCD Chart Analysis</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card-hover {
+            transition: all 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .version-dropdown {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.375rem;
+            padding: 0.5rem;
+            font-size: 0.875rem;
+        }
         .loading-spinner {
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #3498db;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
             border-radius: 50%;
-            width: 20px;
-            height: 20px;
+            width: 30px;
+            height: 30px;
             animation: spin 1s linear infinite;
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background-color: #e5e7eb;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #667eea;
+            transition: width 0.3s ease;
+        }
+        .refresh-icon {
+            cursor: pointer;
+            color: #667eea;
+            transition: color 0.2s ease;
+        }
+        .refresh-icon:hover {
+            color: #5a67d8;
+        }
+        .refresh-icon.loading {
+            animation: spin 1s linear infinite;
+        }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <div x-data="helmAwareApp()" class="container mx-auto px-4 py-8">
-        <!-- Header -->
-        <div class="text-center mb-8">
-            <h1 class="text-4xl font-bold text-gray-900 mb-2">Helm-Aware</h1>
-            <p class="text-lg text-gray-600">ArgoCD Helm Chart Analysis Dashboard</p>
-        </div>
-
-        <!-- Cache Metadata -->
-        {% if cache_metadata %}
-        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+<body class="bg-gray-50">
+    <!-- Header -->
+    <header class="gradient-bg text-white shadow-lg">
+        <div class="container mx-auto px-6 py-4">
             <div class="flex items-center justify-between">
-                <div>
-                    <h3 class="text-lg font-semibold text-blue-900">Cache Status</h3>
-                    <p class="text-blue-700">
-                        Last updated: 
-                        <span x-text="formatDate('{{ cache_metadata.last_update }}')" class="font-mono"></span>
-                        {% if cache_metadata.chart_count %}
-                        | Cached charts: {{ cache_metadata.chart_count }}
-                        {% endif %}
-                    </p>
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-ship text-2xl"></i>
+                    <h1 class="text-2xl font-bold">Helm Aware</h1>
                 </div>
-                <button @click="clearCache()" 
-                        class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors">
-                    Clear Cache
-                </button>
+                <div class="flex items-center space-x-4">
+                    <button id="refreshAllBtn" class="bg-white bg-opacity-20 hover:bg-opacity-30 px-4 py-2 rounded-lg transition-all duration-200">
+                        <i class="fas fa-sync-alt mr-2"></i>Refresh All Versions
+                    </button>
+                    <div id="statusIndicator" class="flex items-center space-x-2">
+                        <div class="w-2 h-2 bg-green-400 rounded-full"></div>
+                        <span class="text-sm">Connected</span>
+                    </div>
+                </div>
             </div>
         </div>
-        {% endif %}
+    </header>
 
+    <!-- Main Content -->
+    <main class="container mx-auto px-6 py-8">
         <!-- Loading State -->
-        <div x-show="loading" class="text-center py-12">
-            <div class="loading-spinner mx-auto mb-4"></div>
-            <p class="text-gray-600">Loading ArgoCD applications...</p>
+        <div id="loadingState" class="flex items-center justify-center py-12">
+            <div class="text-center">
+                <div class="loading-spinner mx-auto mb-4"></div>
+                <p class="text-gray-600">Loading ArgoCD Applications and ApplicationSets...</p>
+                <div class="mt-4 w-64 mx-auto">
+                    <div class="progress-bar">
+                        <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+                <p id="loadingStatus" class="text-sm text-gray-500 mt-2">Initializing...</p>
+            </div>
         </div>
 
         <!-- Error State -->
-        <div x-show="error" class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-            <div class="flex">
-                <div class="flex-shrink-0">
-                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-                    </svg>
+        <div id="errorState" class="hidden bg-red-50 border border-red-200 rounded-lg p-6 mb-6">
+            <div class="flex items-center">
+                <i class="fas fa-exclamation-triangle text-red-500 mr-3"></i>
+                <div>
+                    <h3 class="text-red-800 font-semibold">Error Loading Data</h3>
+                    <p id="errorMessage" class="text-red-600 mt-1"></p>
+                    <button id="retryBtn" class="mt-3 bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">
+                        Retry
+                    </button>
                 </div>
-                <div class="ml-3">
-                    <h3 class="text-sm font-medium text-red-800">Error</h3>
-                    <div class="mt-2 text-sm text-red-700">
-                        <p x-text="error"></p>
+            </div>
+        </div>
+
+        <!-- Progress State -->
+        <div id="progressState" class="hidden bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+            <div class="flex items-center">
+                <i class="fas fa-sync-alt text-blue-500 mr-3 animate-spin"></i>
+                <div class="flex-1">
+                    <h3 class="text-blue-800 font-semibold">Fetching Chart Versions</h3>
+                    <p id="progressMessage" class="text-blue-600 mt-1">Loading available versions from remote repositories...</p>
+                    <div class="mt-3 w-full">
+                        <div class="progress-bar">
+                            <div id="versionProgressFill" class="progress-fill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <p id="versionProgressText" class="text-sm text-blue-500 mt-2">0 / 0 charts processed</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Statistics Cards -->
+        <div id="statsSection" class="hidden grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow-md p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="p-3 bg-blue-100 rounded-lg">
+                        <i class="fas fa-rocket text-blue-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Applications</p>
+                        <p id="appCount" class="text-2xl font-bold text-gray-900">0</p>
                     </div>
                 </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-md p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="p-3 bg-purple-100 rounded-lg">
+                        <i class="fas fa-layer-group text-purple-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Application Sets</p>
+                        <p id="appSetCount" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-md p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="p-3 bg-green-100 rounded-lg">
+                        <i class="fas fa-ship text-green-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Helm Charts</p>
+                        <p id="chartCount" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-md p-6 card-hover">
+                <div class="flex items-center">
+                    <div class="p-3 bg-yellow-100 rounded-lg">
+                        <i class="fas fa-arrow-up text-yellow-600 text-xl"></i>
+                    </div>
+                    <div class="ml-4">
+                        <p class="text-sm font-medium text-gray-600">Updates Available</p>
+                        <p id="updateCount" class="text-2xl font-bold text-gray-900">0</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div id="tabsSection" class="hidden mb-6">
+            <div class="border-b border-gray-200">
+                <nav class="-mb-px flex space-x-8">
+                    <button id="applicationsTab" class="tab-button border-b-2 border-blue-500 py-2 px-1 text-sm font-medium text-blue-600">
+                        Applications
+                    </button>
+                    <button id="applicationSetsTab" class="tab-button border-b-2 border-transparent py-2 px-1 text-sm font-medium text-gray-500 hover:text-gray-700">
+                        Application Sets
+                    </button>
+                </nav>
             </div>
         </div>
 
         <!-- Applications Table -->
-        <div x-show="!loading && !error" class="space-y-6">
-            <!-- Applications -->
-            <div class="bg-white shadow rounded-lg">
+        <div id="applicationsSection" class="hidden">
+            <div class="bg-white rounded-lg shadow-md overflow-hidden">
                 <div class="px-6 py-4 border-b border-gray-200">
-                    <div class="flex items-center justify-between">
-                        <h2 class="text-xl font-semibold text-gray-900">Applications</h2>
-                        <div class="flex items-center space-x-2">
-                            <span class="text-sm text-gray-500" x-text="`${applications.length} applications`"></span>
-                            <button @click="refreshAllVersions()" 
-                                    :disabled="refreshing"
-                                    class="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white px-3 py-1 rounded text-sm transition-colors">
-                                <span x-show="!refreshing">Refresh All</span>
-                                <span x-show="refreshing" class="flex items-center">
-                                    <div class="loading-spinner mr-2"></div>
-                                    Refreshing...
-                                </span>
-                            </button>
-                        </div>
-                    </div>
+                    <h2 class="text-lg font-semibold text-gray-900">ArgoCD Applications</h2>
+                    <p class="text-sm text-gray-600 mt-1">Applications with Helm chart analysis</p>
                 </div>
-                <div class="overflow-x-auto">
+                <div class="table-container">
                     <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
+                        <thead class="bg-gray-50 sticky top-0">
                             <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Helm Charts</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Application</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Repository</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chart Name</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Version</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Available Versions</th>
                                 <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                             </tr>
                         </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">
-                            <template x-for="app in applications" :key="app.metadata.name">
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="text-sm font-medium text-gray-900" x-text="app.metadata.name"></div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="text-sm text-gray-500" x-text="app.metadata.namespace"></div>
-                                    </td>
-                                    <td class="px-6 py-4">
-                                        <div class="space-y-2">
-                                            <template x-for="chart in app.helm_charts" :key="`${app.metadata.name}-${chart.chart_name}`">
-                                                <div class="bg-gray-100 rounded p-2">
-                                                    <div class="flex items-center justify-between">
-                                                        <div>
-                                                            <div class="text-sm font-medium" x-text="chart.chart_name"></div>
-                                                            <div class="text-xs text-gray-500" x-text="`${chart.repo_url} (${chart.chart_version})`"></div>
-                                                        </div>
-                                                        <button @click="refreshChartVersions(chart)" 
-                                                                :disabled="chart.refreshing"
-                                                                class="text-blue-600 hover:text-blue-800 disabled:text-gray-400 text-xs">
-                                                            <span x-show="!chart.refreshing">↻</span>
-                                                            <span x-show="chart.refreshing" class="loading-spinner"></span>
-                                                        </button>
-                                                    </div>
-                                                    <div class="mt-1">
-                                                        <div class="text-xs text-gray-600">
-                                                            Available versions: 
-                                                            <span x-show="chart.available_versions.length > 0" 
-                                                                  x-text="chart.available_versions.slice(0, 5).join(', ') + (chart.available_versions.length > 5 ? '...' : '')"></span>
-                                                            <span x-show="chart.available_versions.length === 0" class="text-gray-400">Loading...</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </template>
-                                            <div x-show="app.helm_charts.length === 0" class="text-sm text-gray-400 italic">
-                                                No Helm charts found
-                                            </div>
-                                        </div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
-                                              :class="getStatusClass(app.status?.health?.status)">
-                                            <span x-text="app.status?.health?.status || 'Unknown'"></span>
-                                        </span>
-                                    </td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- ApplicationSets -->
-            <div class="bg-white shadow rounded-lg">
-                <div class="px-6 py-4 border-b border-gray-200">
-                    <h2 class="text-xl font-semibold text-gray-900">ApplicationSets</h2>
-                    <p class="text-sm text-gray-500 mt-1" x-text="`${applicationSets.length} application sets`"></p>
-                </div>
-                <div class="overflow-x-auto">
-                    <table class="min-w-full divide-y divide-gray-200">
-                        <thead class="bg-gray-50">
-                            <tr>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Namespace</th>
-                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Helm Charts</th>
-                            </tr>
-                        </thead>
-                        <tbody class="bg-white divide-y divide-gray-200">
-                            <template x-for="appSet in applicationSets" :key="appSet.metadata.name">
-                                <tr class="hover:bg-gray-50">
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="text-sm font-medium text-gray-900" x-text="appSet.metadata.name"></div>
-                                    </td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
-                                        <div class="text-sm text-gray-500" x-text="appSet.metadata.namespace"></div>
-                                    </td>
-                                    <td class="px-6 py-4">
-                                        <div class="space-y-2">
-                                            <template x-for="chart in appSet.helm_charts" :key="`${appSet.metadata.name}-${chart.chart_name}`">
-                                                <div class="bg-gray-100 rounded p-2">
-                                                    <div class="flex items-center justify-between">
-                                                        <div>
-                                                            <div class="text-sm font-medium" x-text="chart.chart_name"></div>
-                                                            <div class="text-xs text-gray-500" x-text="`${chart.repo_url} (${chart.chart_version})`"></div>
-                                                        </div>
-                                                        <button @click="refreshChartVersions(chart)" 
-                                                                :disabled="chart.refreshing"
-                                                                class="text-blue-600 hover:text-blue-800 disabled:text-gray-400 text-xs">
-                                                            <span x-show="!chart.refreshing">↻</span>
-                                                            <span x-show="chart.refreshing" class="loading-spinner"></span>
-                                                        </button>
-                                                    </div>
-                                                    <div class="mt-1">
-                                                        <div class="text-xs text-gray-600">
-                                                            Available versions: 
-                                                            <span x-show="chart.available_versions.length > 0" 
-                                                                  x-text="chart.available_versions.slice(0, 5).join(', ') + (chart.available_versions.length > 5 ? '...' : '')"></span>
-                                                            <span x-show="chart.available_versions.length === 0" class="text-gray-400">Loading...</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </template>
-                                            <div x-show="appSet.helm_charts.length === 0" class="text-sm text-gray-400 italic">
-                                                No Helm charts found
-                                            </div>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </template>
+                        <tbody id="applicationsTableBody" class="bg-white divide-y divide-gray-200">
+                            <!-- Table rows will be populated here -->
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
+
+        <!-- Application Sets Table -->
+        <div id="applicationSetsSection" class="hidden">
+            <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-900">ArgoCD Application Sets</h2>
+                    <p class="text-sm text-gray-600 mt-1">Application Sets with Helm chart analysis</p>
+                </div>
+                <div class="table-container">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Application Set</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Repository</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Chart Name</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Version</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Available Versions</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="applicationSetsTableBody" class="bg-white divide-y divide-gray-200">
+                            <!-- Table rows will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div id="emptyState" class="hidden text-center py-12">
+            <i class="fas fa-ship text-gray-400 text-6xl mb-4"></i>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">No Helm Charts Found</h3>
+            <p class="text-gray-600">No ArgoCD Applications or ApplicationSets with Helm charts were found in your cluster.</p>
+        </div>
     </div>
+    </main>
 
     <script>
-        function helmAwareApp() {
-            return {
-                loading: true,
-                error: null,
-                refreshing: false,
-                applications: [],
-                applicationSets: [],
-                
-                init() {
-                    this.loadApplications();
-                },
-                
-                async loadApplications() {
-                    try {
-                        this.loading = true;
-                        this.error = null;
-                        
-                        const response = await fetch('/api/applications');
-                        const data = await response.json();
-                        
-                        if (response.ok) {
-                            this.applications = data.applications || [];
-                            this.applicationSets = data.application_sets || [];
-                            
-                            // Start fetching versions for all charts
-                            this.fetchAllVersions();
-                        } else {
-                            this.error = data.error || 'Failed to load applications';
-                        }
-                    } catch (err) {
-                        this.error = 'Network error: ' + err.message;
-                    } finally {
-                        this.loading = false;
-                    }
-                },
-                
-                async fetchAllVersions() {
-                    const allCharts = [
-                        ...this.applications.flatMap(app => app.helm_charts),
-                        ...this.applicationSets.flatMap(appSet => appSet.helm_charts)
-                    ];
+        class HelmAwareApp {
+            constructor() {
+                this.currentTab = 'applications';
+                this.data = { applications: [], application_sets: [] };
+                this.chartIdCounter = 0;
+                this.init();
+            }
+            
+            init() {
+                this.bindEvents();
+                this.loadData();
+            }
+
+            bindEvents() {
+                document.getElementById('refreshAllBtn').addEventListener('click', () => {
+                    this.refreshAllVersions();
+                });
+
+                document.getElementById('retryBtn').addEventListener('click', () => {
+                    this.loadData();
+                });
+
+                document.getElementById('applicationsTab').addEventListener('click', () => {
+                    this.switchTab('applications');
+                });
+
+                document.getElementById('applicationSetsTab').addEventListener('click', () => {
+                    this.switchTab('applicationSets');
+                });
+            }
+
+            async loadData() {
+                this.showLoading();
+                this.hideError();
+                this.updateLoadingStatus('Connecting to Kubernetes cluster...');
+                this.updateProgress(10);
+
+                try {
+                    // Step 1: Load local data
+                    this.updateLoadingStatus('Fetching ArgoCD Applications and ApplicationSets...');
+                    this.updateProgress(30);
                     
-                    for (const chart of allCharts) {
-                        await this.fetchChartVersions(chart);
+                    const response = await fetch('/api/applications');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
                     }
-                },
-                
-                async fetchChartVersions(chart) {
-                    try {
-                        const chartKey = `${chart.repo_url}:${chart.chart_name}`;
-                        const response = await fetch(`/api/versions/${encodeURIComponent(chartKey)}`);
-                        const data = await response.json();
-                        
-                        if (response.ok && data.success) {
-                            chart.available_versions = data.versions || [];
-                            chart.version_fetch_status = 'success';
-                        } else {
-                            chart.version_fetch_status = 'error';
-                            chart.available_versions = [];
-                        }
-                    } catch (err) {
-                        chart.version_fetch_status = 'error';
-                        chart.available_versions = [];
+                    
+                    this.data = await response.json();
+                    
+                    if (this.data.error) {
+                        throw new Error(this.data.error);
                     }
-                },
-                
-                async refreshChartVersions(chart) {
-                    try {
-                        chart.refreshing = true;
-                        const chartKey = `${chart.repo_url}:${chart.chart_name}`;
-                        const response = await fetch(`/api/refresh-versions/${encodeURIComponent(chartKey)}`, {
-                            method: 'POST'
-                        });
-                        const data = await response.json();
-                        
-                        if (response.ok && data.success) {
-                            chart.available_versions = data.versions || [];
-                            chart.version_fetch_status = 'success';
-                        } else {
-                            chart.version_fetch_status = 'error';
-                        }
-                    } catch (err) {
-                        chart.version_fetch_status = 'error';
-                    } finally {
-                        chart.refreshing = false;
+
+                    this.updateLoadingStatus('Analyzing Helm charts...');
+                    this.updateProgress(70);
+
+                    // Step 2: Render local data immediately
+                    this.renderData();
+                    
+                    this.updateLoadingStatus('Loading complete!');
+                    this.updateProgress(100);
+                    
+                    // Step 3: Fetch versions asynchronously
+                    if (this.data.total_charts_found > 0) {
+                        this.fetchVersionsAsync();
                     }
-                },
-                
-                async refreshAllVersions() {
-                    try {
-                        this.refreshing = true;
-                        const response = await fetch('/api/fetch-all-versions', {
-                            method: 'POST'
-                        });
-                        const data = await response.json();
-                        
-                        if (response.ok && data.success) {
-                            // Reload applications to get updated data
-                            await this.loadApplications();
-                        } else {
-                            this.error = data.error || 'Failed to refresh versions';
-                        }
-                    } catch (err) {
-                        this.error = 'Network error: ' + err.message;
-                    } finally {
-                        this.refreshing = false;
-                    }
-                },
-                
-                async clearCache() {
-                    try {
-                        const response = await fetch('/api/cache/clear', {
-                            method: 'POST'
-                        });
-                        const data = await response.json();
-                        
-                        if (response.ok && data.success) {
-                            // Reload the page to refresh cache metadata
-                            window.location.reload();
-                        } else {
-                            this.error = data.error || 'Failed to clear cache';
-                        }
-                    } catch (err) {
-                        this.error = 'Network error: ' + err.message;
-                    }
-                },
-                
-                getStatusClass(status) {
-                    switch (status) {
-                        case 'Healthy': return 'bg-green-100 text-green-800';
-                        case 'Progressing': return 'bg-yellow-100 text-yellow-800';
-                        case 'Degraded': return 'bg-red-100 text-red-800';
-                        case 'Suspended': return 'bg-gray-100 text-gray-800';
-                        default: return 'bg-gray-100 text-gray-800';
-                    }
-                },
-                
-                formatDate(dateString) {
-                    if (!dateString) return 'Never';
-                    return new Date(dateString).toLocaleString();
+
+                } catch (error) {
+                    console.error('Error loading data:', error);
+                    this.showError(error.message);
+                } finally {
+                    this.hideLoading();
                 }
             }
+
+            async refreshAllVersions() {
+                this.showProgress();
+                
+                try {
+                    // Collect all charts that need versions
+                    const charts = [];
+                    let chartId = 0;
+
+                    // Add charts from applications
+                    this.data.applications.forEach(app => {
+                        app.helm_charts.forEach(chart => {
+                            chart.chart_id = chartId++;
+                            charts.push(chart);
+                        });
+                    });
+
+                    // Add charts from application sets
+                    this.data.application_sets.forEach(appSet => {
+                        appSet.helm_charts.forEach(chart => {
+                            chart.chart_id = chartId++;
+                            charts.push(chart);
+                        });
+                    });
+
+                    if (charts.length === 0) {
+                        this.hideProgress();
+                        return;
+                    }
+
+                    this.updateProgressMessage(`Refreshing versions for ${charts.length} charts...`);
+                    
+                    // Fetch versions in batches
+                    const batchSize = 5;
+                    const results = [];
+                    
+                    for (let i = 0; i < charts.length; i += batchSize) {
+                        const batch = charts.slice(i, i + batchSize);
+                        const progress = ((i + batchSize) / charts.length) * 100;
+                        this.updateVersionProgress(progress);
+                        this.updateVersionProgressText(`${Math.min(i + batchSize, charts.length)} / ${charts.length} charts processed`);
+                        
+                        // Fetch versions for this batch
+                        const batchResults = await this.fetchVersionsForBatch(batch);
+                        results.push(...batchResults);
+                        
+                        // Small delay to prevent overwhelming the server
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+
+                    // Update the data with fetched versions
+                    this.updateDataWithVersions(results);
+                    
+                    // Re-render to show versions
+                    this.renderData();
+                    
+                } catch (error) {
+                    console.error('Error refreshing versions:', error);
+                    this.updateProgressMessage('Error refreshing versions: ' + error.message);
+                } finally {
+                    this.hideProgress();
+                }
+            }
+            
+            async fetchVersionsAsync() {
+                this.showProgress();
+                
+                try {
+                    // Collect all charts that need versions
+                    const charts = [];
+                    let chartId = 0;
+
+                    // Add charts from applications
+                    this.data.applications.forEach(app => {
+                        app.helm_charts.forEach(chart => {
+                            chart.chart_id = chartId++;
+                            charts.push(chart);
+                        });
+                    });
+
+                    // Add charts from application sets
+                    this.data.application_sets.forEach(appSet => {
+                        appSet.helm_charts.forEach(chart => {
+                            chart.chart_id = chartId++;
+                            charts.push(chart);
+                        });
+                    });
+
+                    if (charts.length === 0) {
+                        this.hideProgress();
+                        return;
+                    }
+
+                    this.updateProgressMessage(`Fetching versions for ${charts.length} charts...`);
+                    
+                    // Fetch versions in batches
+                    const batchSize = 5;
+                    const results = [];
+                    
+                    for (let i = 0; i < charts.length; i += batchSize) {
+                        const batch = charts.slice(i, i + batchSize);
+                        const progress = ((i + batchSize) / charts.length) * 100;
+                        this.updateVersionProgress(progress);
+                        this.updateVersionProgressText(`${Math.min(i + batchSize, charts.length)} / ${charts.length} charts processed`);
+                        
+                        // Fetch versions for this batch
+                        const batchResults = await this.fetchVersionsForBatch(batch);
+                        results.push(...batchResults);
+                        
+                        // Small delay to prevent overwhelming the server
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+
+                    // Update the data with fetched versions
+                    this.updateDataWithVersions(results);
+                    
+                    // Re-render to show versions
+                    this.renderData();
+                    
+                } catch (error) {
+                    console.error('Error fetching versions:', error);
+                    this.updateProgressMessage('Error fetching versions: ' + error.message);
+                } finally {
+                    this.hideProgress();
+                }
+            }
+            
+            async fetchVersionsForBatch(charts) {
+                try {
+                    const response = await fetch('/api/fetch-all-versions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ charts })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    return data.results || [];
+                } catch (error) {
+                    console.error('Error fetching batch versions:', error);
+                    return charts.map(chart => ({
+                        chart_id: chart.chart_id,
+                        versions: [],
+                        status: 'error',
+                        error: error.message
+                    }));
+                }
+            }
+
+            updateDataWithVersions(results) {
+                // Update applications
+                this.data.applications.forEach(app => {
+                    app.helm_charts.forEach(chart => {
+                        const result = results.find(r => r.chart_id === chart.chart_id);
+                        if (result) {
+                            chart.available_versions = result.versions;
+                            chart.version_fetch_status = result.status;
+                            if (result.error) {
+                                chart.version_fetch_error = result.error;
+                            }
+                        }
+                    });
+                });
+
+                // Update application sets
+                this.data.application_sets.forEach(appSet => {
+                    appSet.helm_charts.forEach(chart => {
+                        const result = results.find(r => r.chart_id === chart.chart_id);
+                        if (result) {
+                            chart.available_versions = result.versions;
+                            chart.version_fetch_status = result.status;
+                            if (result.error) {
+                                chart.version_fetch_error = result.error;
+                            }
+                        }
+                    });
+                });
+            }
+
+            renderData() {
+                const totalApps = this.data.applications.length;
+                const totalAppSets = this.data.application_sets.length;
+                const totalCharts = this.countTotalCharts();
+                const updatesAvailable = this.countUpdatesAvailable();
+
+                // Update statistics
+                document.getElementById('appCount').textContent = totalApps;
+                document.getElementById('appSetCount').textContent = totalAppSets;
+                document.getElementById('chartCount').textContent = totalCharts;
+                document.getElementById('updateCount').textContent = updatesAvailable;
+
+                // Show/hide sections
+                if (totalApps === 0 && totalAppSets === 0) {
+                    this.showEmptyState();
+                } else {
+                    this.hideEmptyState();
+                    this.showStats();
+                    this.showTabs();
+                    this.renderTables();
+                }
+            }
+
+            countTotalCharts() {
+                let count = 0;
+                this.data.applications.forEach(app => {
+                    count += (app.helm_charts || []).length;
+                });
+                this.data.application_sets.forEach(appSet => {
+                    count += (appSet.helm_charts || []).length;
+                });
+                return count;
+            }
+
+            countUpdatesAvailable() {
+                let count = 0;
+                [...this.data.applications, ...this.data.application_sets].forEach(resource => {
+                    (resource.helm_charts || []).forEach(chart => {
+                        if (chart.available_versions && chart.available_versions.length > 0) {
+                            const latestVersion = chart.available_versions[0];
+                            if (latestVersion !== chart.chart_version) {
+                                count++;
+                            }
+                        }
+                    });
+                });
+                return count;
+            }
+
+            renderTables() {
+                this.renderApplicationsTable();
+                this.renderApplicationSetsTable();
+                this.switchTab(this.currentTab);
+            }
+
+            renderApplicationsTable() {
+                const tbody = document.getElementById('applicationsTableBody');
+                tbody.innerHTML = '';
+
+                this.data.applications.forEach(app => {
+                    const helmCharts = app.helm_charts || [];
+                    
+                    if (helmCharts.length === 0) {
+                        // Show app without charts
+                        this.addTableRow(tbody, app, null);
+                    } else {
+                        // Show app with each chart
+                        helmCharts.forEach(chart => {
+                            this.addTableRow(tbody, app, chart);
+                        });
+                    }
+                });
+            }
+
+            renderApplicationSetsTable() {
+                const tbody = document.getElementById('applicationSetsTableBody');
+                tbody.innerHTML = '';
+
+                this.data.application_sets.forEach(appSet => {
+                    const helmCharts = appSet.helm_charts || [];
+                    
+                    if (helmCharts.length === 0) {
+                        // Show app set without charts
+                        this.addTableRow(tbody, appSet, null);
+                    } else {
+                        // Show app set with each chart
+                        helmCharts.forEach(chart => {
+                            this.addTableRow(tbody, appSet, chart);
+                        });
+                    }
+                });
+            }
+
+            addTableRow(tbody, resource, chart) {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50';
+
+                const name = resource.metadata?.name || 'Unknown';
+                const namespace = resource.metadata?.namespace || 'N/A';
+                const repoUrl = chart?.repo_url || 'N/A';
+                const chartName = chart?.chart_name || 'N/A';
+                const currentVersion = chart?.chart_version || 'N/A';
+                const availableVersions = chart?.available_versions || [];
+                const fetchStatus = chart?.version_fetch_status || 'pending';
+
+                const isUpdateAvailable = availableVersions.length > 0 && 
+                                        availableVersions[0] !== currentVersion;
+
+                row.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="flex items-center">
+                            <div class="flex-shrink-0 h-10 w-10">
+                                <div class="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
+                                    <i class="fas fa-rocket text-blue-600"></i>
+                                </div>
+                            </div>
+                            <div class="ml-4">
+                                <div class="text-sm font-medium text-gray-900">${name}</div>
+                                <div class="text-sm text-gray-500">${resource.kind}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <div class="max-w-xs truncate" title="${repoUrl}">${repoUrl}</div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${chartName}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${currentVersion}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        ${this.renderVersionDropdown(availableVersions, currentVersion, fetchStatus, chart)}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        ${this.renderStatusBadge(isUpdateAvailable, fetchStatus)}
+                    </td>
+                `;
+
+                tbody.appendChild(row);
+            }
+
+            renderVersionDropdown(versions, currentVersion, fetchStatus, chart) {
+                if (fetchStatus === 'pending') {
+                    return '<span class="text-gray-400">Loading...</span>';
+                }
+                
+                if (fetchStatus === 'error') {
+                    return '<span class="text-red-400">Error loading</span>';
+                }
+                
+                if (fetchStatus === 'timeout') {
+                    return '<span class="text-yellow-400">Timeout</span>';
+                }
+
+                if (versions.length === 0) {
+                    return `
+                        <div class="flex items-center space-x-2">
+                            <span class="text-gray-400">Click refresh to load versions</span>
+                            <i class="fas fa-sync-alt refresh-icon" onclick="app.refreshChartVersions('${chart?.repo_url}:${chart?.chart_name}')" title="Refresh versions"></i>
+                        </div>
+                    `;
+                }
+
+                const latestVersion = versions[0];
+                const isUpdateAvailable = latestVersion !== currentVersion;
+
+                let options = '';
+                versions.forEach(version => {
+                    const isLatest = version === latestVersion;
+                    const isCurrent = version === currentVersion;
+                    const optionText = isLatest ? `${version} (Latest)` : version;
+                    const selected = isLatest ? 'selected' : '';
+                    options += `<option value="${version}" ${selected}>${optionText}</option>`;
+                });
+
+                return `
+                    <div class="flex items-center space-x-2">
+                        <select class="version-dropdown ${isUpdateAvailable ? 'border-yellow-300 bg-yellow-50' : ''}" 
+                                ${isUpdateAvailable ? 'title="Update available"' : ''}>
+                            ${options}
+                        </select>
+                        <i class="fas fa-sync-alt refresh-icon" onclick="app.refreshChartVersions('${chart?.repo_url}:${chart?.chart_name}')" title="Refresh versions"></i>
+                    </div>
+                `;
+            }
+
+            async refreshChartVersions(chartKey) {
+                try {
+                    // Parse chart key to get repo_url and chart_name
+                    const [repo_url, chart_name] = chartKey.split(':');
+                    const chart_info = { repo_url, chart_name };
+                    
+                    // Use the HelmService to refresh versions (this will update the cache)
+                    const response = await fetch('/api/fetch-all-versions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ charts: [chart_info] })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    
+                    if (data.results && data.results.length > 0) {
+                        const result = data.results[0];
+                        // Update the chart data
+                        this.updateChartVersions(chartKey, result.versions);
+                        this.renderData(); // Re-render to show updated data
+                    } else {
+                        console.error('Error refreshing versions: No results returned');
+                    }
+                } catch (error) {
+                    console.error('Error refreshing chart versions:', error);
+                }
+            }
+
+            updateChartVersions(chartKey, versions) {
+                // Update applications
+                this.data.applications.forEach(app => {
+                    app.helm_charts.forEach(chart => {
+                        const key = `${chart.repo_url}:${chart.chart_name}`;
+                        if (key === chartKey) {
+                            chart.available_versions = versions;
+                            chart.version_fetch_status = 'success';
+                        }
+                    });
+                });
+
+                // Update application sets
+                this.data.application_sets.forEach(appSet => {
+                    appSet.helm_charts.forEach(chart => {
+                        const key = `${chart.repo_url}:${chart.chart_name}`;
+                        if (key === chartKey) {
+                            chart.available_versions = versions;
+                            chart.version_fetch_status = 'success';
+                        }
+                    });
+                });
+            }
+
+            renderStatusBadge(isUpdateAvailable, fetchStatus) {
+                if (fetchStatus === 'pending') {
+                    return `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                            <i class="fas fa-spinner fa-spin mr-1"></i>
+                            Loading
+                        </span>
+                    `;
+                }
+                
+                if (fetchStatus === 'error') {
+                    return `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <i class="fas fa-exclamation-triangle mr-1"></i>
+                            Error
+                        </span>
+                    `;
+                }
+                
+                if (fetchStatus === 'timeout') {
+                    return `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            <i class="fas fa-clock mr-1"></i>
+                            Timeout
+                        </span>
+                    `;
+                }
+
+                if (isUpdateAvailable) {
+                    return `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                            <i class="fas fa-arrow-up mr-1"></i>
+                            Update Available
+                        </span>
+                    `;
+                } else {
+                    return `
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <i class="fas fa-check mr-1"></i>
+                            Up to Date
+                        </span>
+                    `;
+                }
+            }
+
+            switchTab(tab) {
+                this.currentTab = tab;
+                
+                // Update tab buttons
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('border-blue-500', 'text-blue-600');
+                    btn.classList.add('border-transparent', 'text-gray-500');
+                });
+
+                if (tab === 'applications') {
+                    document.getElementById('applicationsTab').classList.add('border-blue-500', 'text-blue-600');
+                    document.getElementById('applicationsSection').classList.remove('hidden');
+                    document.getElementById('applicationSetsSection').classList.add('hidden');
+                } else {
+                    document.getElementById('applicationSetsTab').classList.add('border-blue-500', 'text-blue-600');
+                    document.getElementById('applicationSetsSection').classList.remove('hidden');
+                    document.getElementById('applicationsSection').classList.add('hidden');
+                }
+            }
+
+            showLoading() {
+                document.getElementById('loadingState').classList.remove('hidden');
+            }
+
+            hideLoading() {
+                document.getElementById('loadingState').classList.add('hidden');
+            }
+
+            showProgress() {
+                document.getElementById('progressState').classList.remove('hidden');
+            }
+
+            hideProgress() {
+                document.getElementById('progressState').classList.add('hidden');
+            }
+
+            showError(message) {
+                document.getElementById('errorMessage').textContent = message;
+                document.getElementById('errorState').classList.remove('hidden');
+            }
+
+            hideError() {
+                document.getElementById('errorState').classList.add('hidden');
+            }
+
+            updateLoadingStatus(status) {
+                document.getElementById('loadingStatus').textContent = status;
+            }
+
+            updateProgress(percent) {
+                document.getElementById('progressFill').style.width = `${percent}%`;
+            }
+
+            updateProgressMessage(message) {
+                document.getElementById('progressMessage').textContent = message;
+            }
+
+            updateVersionProgress(percent) {
+                document.getElementById('versionProgressFill').style.width = `${percent}%`;
+            }
+
+            updateVersionProgressText(text) {
+                document.getElementById('versionProgressText').textContent = text;
+            }
+
+            showStats() {
+                document.getElementById('statsSection').classList.remove('hidden');
+            }
+
+            showTabs() {
+                document.getElementById('tabsSection').classList.remove('hidden');
+            }
+
+            showEmptyState() {
+                document.getElementById('emptyState').classList.remove('hidden');
+            }
+
+            hideEmptyState() {
+                document.getElementById('emptyState').classList.add('hidden');
+            }
         }
+
+        // Initialize the application when the page loads
+        let app;
+        document.addEventListener('DOMContentLoaded', () => {
+            app = new HelmAwareApp();
+        });
     </script>
 </body>
 </html> 

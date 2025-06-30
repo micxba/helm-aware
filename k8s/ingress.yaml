@@ -6,9 +6,6 @@ metadata:
   labels:
     app: helm-aware
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/proxy-body-size: "0"
     external-dns.alpha.kubernetes.io/target: "alljedis.justdied.com"
 spec:
   tls:
