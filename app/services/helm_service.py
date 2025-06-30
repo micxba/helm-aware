@@ -44,10 +44,13 @@ class HelmService:
         helm_charts = []
         spec = application.get('spec', {})
         
+        # Check if the application itself has Helm configuration
+        has_helm_config = self._has_helm_config_in_application(application)
+        
         # Check single source
         if 'source' in spec:
             logger.debug("Found single source, analyzing...")
-            chart_info = self._extract_helm_info(spec['source'])
+            chart_info = self._extract_helm_info(spec['source'], has_helm_config)
             if chart_info:
                 helm_charts.append(chart_info)
                 logger.debug(f"Added Helm chart: {chart_info['chart_name']}")
@@ -57,7 +60,7 @@ class HelmService:
             logger.debug(f"Found {len(spec['sources'])} sources, analyzing each...")
             for i, source in enumerate(spec['sources']):
                 logger.debug(f"Analyzing source {i+1}/{len(spec['sources'])}...")
-                chart_info = self._extract_helm_info(source)
+                chart_info = self._extract_helm_info(source, has_helm_config)
                 if chart_info:
                     helm_charts.append(chart_info)
                     logger.debug(f"Added Helm chart: {chart_info['chart_name']}")
@@ -74,10 +77,13 @@ class HelmService:
         template = spec.get('template', {})
         template_spec = template.get('spec', {})
         
+        # Check if the application set template has Helm configuration
+        has_helm_config = self._has_helm_config_in_application_set(application_set)
+        
         # Check single source in template
         if 'source' in template_spec:
             logger.debug("Found single source in template, analyzing...")
-            chart_info = self._extract_helm_info(template_spec['source'])
+            chart_info = self._extract_helm_info(template_spec['source'], has_helm_config)
             if chart_info:
                 helm_charts.append(chart_info)
                 logger.debug(f"Added Helm chart: {chart_info['chart_name']}")
@@ -87,14 +93,14 @@ class HelmService:
             logger.debug(f"Found {len(template_spec['sources'])} sources in template, analyzing each...")
             for i, source in enumerate(template_spec['sources']):
                 logger.debug(f"Analyzing template source {i+1}/{len(template_spec['sources'])}...")
-                chart_info = self._extract_helm_info(source)
+                chart_info = self._extract_helm_info(source, has_helm_config)
                 if chart_info:
                     helm_charts.append(chart_info)
                     logger.debug(f"Added Helm chart: {chart_info['chart_name']}")
         
         return helm_charts
     
-    def _extract_helm_info(self, source):
+    def _extract_helm_info(self, source, has_helm_config=False):
         """Extract Helm chart information from a source"""
         logger.debug(f"Extracting Helm info from source: {source}")
         repo_url = source.get('repoURL', '')
@@ -104,7 +110,7 @@ class HelmService:
         logger.debug(f"Source details - repoURL: {repo_url}, chart: {chart}, targetRevision: {target_revision}")
         
         # Check if this is a Helm chart
-        if not self._is_helm_chart(source):
+        if not self._is_helm_chart(source, has_helm_config):
             logger.debug("Source is not a Helm chart, skipping")
             return None
         
@@ -127,78 +133,93 @@ class HelmService:
         logger.debug(f"Extracted chart info: {chart_info}")
         return chart_info
     
-    def _is_helm_chart(self, source):
-        """Determine if a source is a Helm chart with improved detection logic"""
+    def _is_helm_chart(self, source, has_helm_config=False):
+        """Determine if a source is a Helm chart by checking for Helm-specific fields"""
         logger.debug(f"Checking if source is Helm chart: {source}")
         
+        # Rule 1: Check for Helm-specific fields in the source itself
+        if self._has_helm_fields_in_source(source):
+            logger.debug("Source has Helm-specific fields - is a Helm chart")
+            return True
+        
+        # Rule 2: Check for Helm configuration in the parent Application/ApplicationSet
+        if has_helm_config:
+            logger.debug("Parent has Helm configuration - is a Helm chart")
+            return True
+        
+        # Rule 3: Check for chart field with OCI registry
         repo_url = source.get('repoURL', '')
         chart = source.get('chart', '')
-        target_revision = source.get('targetRevision', '')
-        path = source.get('path', '')
         
-        # Rule 1: Must have a 'chart' field to be a Helm chart
-        if not chart:
-            logger.debug("No 'chart' field found - not a Helm chart")
-            return False
-        
-        # Rule 2: Check if it's a Git repository (not a Helm chart)
-        if self._is_git_repository(repo_url):
-            logger.debug(f"Git repository detected: {repo_url} - not a Helm chart")
-            return False
-        
-        # Rule 3: Check if it has a 'path' field (indicates Git-based deployment)
-        if path:
-            logger.debug(f"Path field found: {path} - indicates Git-based deployment, not Helm chart")
-            return False
-        
-        # Rule 4: Check if it's an OCI registry (common for Helm charts)
-        if repo_url.startswith('oci://'):
-            logger.debug("OCI registry detected - likely a Helm chart")
+        if chart and repo_url.startswith('oci://'):
+            logger.debug("Chart field with OCI registry - is a Helm chart")
             return True
         
-        # Rule 5: Check if it's a Helm repository (HTTP/HTTPS)
-        if repo_url.startswith(('http://', 'https://')):
-            # Additional check: if it has a chart field and looks like a Helm repo
-            if self._looks_like_helm_repo(repo_url):
-                logger.debug("HTTP/HTTPS Helm repository detected")
-                return True
-            else:
-                logger.debug("HTTP/HTTPS repository but doesn't look like Helm repo")
-                return False
-        
-        # Rule 6: Check if targetRevision looks like a Helm version (semantic versioning)
-        if target_revision and re.match(r'^\d+\.\d+\.\d+', target_revision):
-            logger.debug(f"Target revision looks like Helm version: {target_revision}")
+        # Rule 4: Check for chart field with known Helm repository patterns
+        if chart and self._looks_like_helm_repo(repo_url):
+            logger.debug("Chart field with Helm repository - is a Helm chart")
             return True
-        
-        # Rule 7: If we have a chart name but no clear indicators, be conservative
-        if chart:
-            logger.debug(f"Chart field present but unclear if Helm chart: {chart}")
-            return False
         
         logger.debug("Source does not meet Helm chart criteria")
         return False
     
-    def _is_git_repository(self, repo_url):
-        """Check if the repository URL is a Git repository"""
-        if not repo_url:
-            return False
-        
-        # Git URL patterns
-        git_patterns = [
-            r'\.git$',  # Ends with .git
-            r'^git@',   # SSH Git URL
-            r'^git://', # Git protocol
-            r'github\.com',  # GitHub
-            r'gitlab\.com',  # GitLab
-            r'bitbucket\.org',  # Bitbucket
-            r'gitea\.',  # Gitea
-            r'gogs\.',   # Gogs
+    def _has_helm_fields_in_source(self, source):
+        """Check if the source has Helm-specific fields"""
+        # Check for Helm-specific fields in the source
+        helm_fields = [
+            'helm',  # Helm configuration block
         ]
         
-        for pattern in git_patterns:
-            if re.search(pattern, repo_url, re.IGNORECASE):
+        for field in helm_fields:
+            if field in source:
+                logger.debug(f"Found Helm field '{field}' in source")
                 return True
+        
+        return False
+    
+    def _has_helm_config_in_application(self, application):
+        """Check if the Application has Helm configuration"""
+        spec = application.get('spec', {})
+        
+        # Check for Helm configuration in the spec
+        if 'helm' in spec:
+            logger.debug("Application has Helm configuration in spec")
+            return True
+        
+        # Check for Helm configuration in sources
+        if 'source' in spec and 'helm' in spec['source']:
+            logger.debug("Application source has Helm configuration")
+            return True
+        
+        if 'sources' in spec:
+            for source in spec['sources']:
+                if 'helm' in source:
+                    logger.debug("Application has Helm configuration in sources")
+                    return True
+        
+        return False
+    
+    def _has_helm_config_in_application_set(self, application_set):
+        """Check if the ApplicationSet has Helm configuration"""
+        spec = application_set.get('spec', {})
+        template = spec.get('template', {})
+        template_spec = template.get('spec', {})
+        
+        # Check for Helm configuration in the template spec
+        if 'helm' in template_spec:
+            logger.debug("ApplicationSet template has Helm configuration in spec")
+            return True
+        
+        # Check for Helm configuration in template sources
+        if 'source' in template_spec and 'helm' in template_spec['source']:
+            logger.debug("ApplicationSet template source has Helm configuration")
+            return True
+        
+        if 'sources' in template_spec:
+            for source in template_spec['sources']:
+                if 'helm' in source:
+                    logger.debug("ApplicationSet has Helm configuration in template sources")
+                    return True
         
         return False
     
@@ -220,6 +241,29 @@ class HelmService:
         ]
         
         for pattern in helm_patterns:
+            if re.search(pattern, repo_url, re.IGNORECASE):
+                return True
+        
+        return False
+    
+    def _is_git_repository(self, repo_url):
+        """Check if the repository URL is a Git repository"""
+        if not repo_url:
+            return False
+        
+        # Git URL patterns
+        git_patterns = [
+            r'\.git$',  # Ends with .git
+            r'^git@',   # SSH Git URL
+            r'^git://', # Git protocol
+            r'github\.com',  # GitHub
+            r'gitlab\.com',  # GitLab
+            r'bitbucket\.org',  # Bitbucket
+            r'gitea\.',  # Gitea
+            r'gogs\.',   # Gogs
+        ]
+        
+        for pattern in git_patterns:
             if re.search(pattern, repo_url, re.IGNORECASE):
                 return True
         
