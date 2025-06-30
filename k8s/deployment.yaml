@@ -18,8 +18,8 @@ spec:
       serviceAccountName: helm-aware
       containers:
       - name: helm-aware
-        image: helm-aware:latest
-        imagePullPolicy: IfNotPresent
+        image: ghcr.io/micxba/helm-aware:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 5000
           name: http
@@ -46,12 +46,20 @@ spec:
               key: LOG_LEVEL
         resources:
           requests:
-            memory: "128Mi"
-            cpu: "100m"
+            memory: "256Mi"
+            cpu: "200m"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "1Gi"
+            cpu: "1000m"
         livenessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
           httpGet:
             path: /
             port: 5000
@@ -59,22 +67,20 @@ spec:
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 3
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 5000
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3
         securityContext:
           allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
+          readOnlyRootFilesystem: false
           runAsNonRoot: true
           runAsUser: 1000
           capabilities:
             drop:
             - ALL
+        volumeMounts:
+        - name: logs
+          mountPath: /tmp
+      volumes:
+      - name: logs
+        emptyDir: {}
       securityContext:
         fsGroup: 1000
         runAsNonRoot: true
