@@ -69,7 +69,7 @@ class CacheService:
             logger.error(f"Error getting cached versions: {e}")
             return None
     
-    def set_cached_versions(self, chart_key, versions, last_update=None):
+    def set_cached_versions(self, chart_key, versions, last_update=None, max_retries=3):
         """Cache versions for a specific chart"""
         if not self.v1_api:
             logger.warning("Kubernetes API not available, skipping cache update")
@@ -83,54 +83,56 @@ class CacheService:
             'last_update': last_update
         }
         
-        try:
-            # Try to get existing ConfigMap
+        safe_key = self._sanitize_key(chart_key)
+        for attempt in range(max_retries):
             try:
-                configmap = self.v1_api.read_namespaced_config_map(
-                    name=self.configmap_name,
-                    namespace=self.namespace
-                )
-                data = configmap.data or {}  # type: ignore
-            except ApiException as e:
-                if e.status == 404:
-                    # ConfigMap doesn't exist, create it
-                    logger.info(f"Creating new ConfigMap {self.configmap_name}")
-                    configmap = client.V1ConfigMap(
-                        metadata=client.V1ObjectMeta(
-                            name=self.configmap_name,
-                            namespace=self.namespace
-                        ),
-                        data={}
+                try:
+                    configmap = self.v1_api.read_namespaced_config_map(
+                        name=self.configmap_name,
+                        namespace=self.namespace
                     )
-                    data = {}
-                else:
-                    raise
-            
-            # Update the data
-            safe_key = self._sanitize_key(chart_key)
-            data[safe_key] = json.dumps(cached_data)
-            configmap.data = data  # type: ignore
-            
-            # Update or create the ConfigMap
-            if configmap.metadata.resource_version:  # type: ignore
-                self.v1_api.replace_namespaced_config_map(
-                    name=self.configmap_name,
-                    namespace=self.namespace,
-                    body=configmap
-                )
-                logger.debug(f"Updated ConfigMap with data for {safe_key}")
-            else:
-                self.v1_api.create_namespaced_config_map(
-                    namespace=self.namespace,
-                    body=configmap
-                )
-                logger.debug(f"Created ConfigMap with data for {safe_key}")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error setting cached versions: {e}")
-            return False
+                    data = configmap.data or {}  # type: ignore
+                except ApiException as e:
+                    if e.status == 404:
+                        logger.info(f"Creating new ConfigMap {self.configmap_name}")
+                        configmap = client.V1ConfigMap(
+                            metadata=client.V1ObjectMeta(
+                                name=self.configmap_name,
+                                namespace=self.namespace
+                            ),
+                            data={}
+                        )
+                        data = {}
+                    else:
+                        raise
+                data[safe_key] = json.dumps(cached_data)
+                configmap.data = data  # type: ignore
+                try:
+                    if hasattr(configmap.metadata, 'resource_version') and configmap.metadata.resource_version:  # type: ignore
+                        self.v1_api.replace_namespaced_config_map(
+                            name=self.configmap_name,
+                            namespace=self.namespace,
+                            body=configmap
+                        )
+                        logger.debug(f"Updated ConfigMap with data for {safe_key}")
+                    else:
+                        self.v1_api.create_namespaced_config_map(
+                            namespace=self.namespace,
+                            body=configmap
+                        )
+                        logger.debug(f"Created ConfigMap with data for {safe_key}")
+                    return True
+                except ApiException as e:
+                    if e.status == 409 and attempt < max_retries - 1:
+                        logger.warning(f"ConfigMap update conflict, retrying ({attempt+1}/{max_retries})")
+                        continue  # retry
+                    else:
+                        raise
+            except Exception as e:
+                logger.error(f"Error setting cached versions: {e}")
+                return False
+        logger.error("Failed to update ConfigMap after retries")
+        return False
     
     def get_cache_metadata(self):
         """Get metadata about the cache (last update time, etc.)"""
