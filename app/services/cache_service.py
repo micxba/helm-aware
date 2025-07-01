@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,11 @@ class CacheService:
         self.v1_api = client.CoreV1Api()
         logger.info("CacheService initialized successfully")
     
+    def _sanitize_key(self, key):
+        safe_key = re.sub(r'[^a-zA-Z0-9._-]', '_', key)
+        logger.debug(f"Sanitized ConfigMap key: {key} -> {safe_key}")
+        return safe_key
+
     def get_cached_versions(self, chart_key):
         """Get cached versions for a specific chart"""
         if not self.v1_api:
@@ -38,17 +44,18 @@ class CacheService:
                 namespace=self.namespace
             )
             
+            safe_key = self._sanitize_key(chart_key)
             if hasattr(configmap, 'data') and configmap.data:  # type: ignore
-                data = configmap.data.get(chart_key)  # type: ignore
+                data = configmap.data.get(safe_key)  # type: ignore
                 if data:
                     cached_data = json.loads(data)
-                    logger.debug(f"Retrieved cached data for {chart_key}: {cached_data}")
+                    logger.debug(f"Retrieved cached data for {safe_key}: {cached_data}")
                     return cached_data
                 else:
-                    logger.debug(f"No cached data found for {chart_key}")
+                    logger.debug(f"No cached data found for {safe_key}")
                     return None
             else:
-                logger.debug(f"No data in ConfigMap for {chart_key}")
+                logger.debug(f"No data in ConfigMap for {safe_key}")
                 return None
                 
         except ApiException as e:
@@ -100,7 +107,8 @@ class CacheService:
                     raise
             
             # Update the data
-            data[chart_key] = json.dumps(cached_data)
+            safe_key = self._sanitize_key(chart_key)
+            data[safe_key] = json.dumps(cached_data)
             configmap.data = data  # type: ignore
             
             # Update or create the ConfigMap
@@ -110,13 +118,13 @@ class CacheService:
                     namespace=self.namespace,
                     body=configmap
                 )
-                logger.debug(f"Updated ConfigMap with data for {chart_key}")
+                logger.debug(f"Updated ConfigMap with data for {safe_key}")
             else:
                 self.v1_api.create_namespaced_config_map(
                     namespace=self.namespace,
                     body=configmap
                 )
-                logger.debug(f"Created ConfigMap with data for {chart_key}")
+                logger.debug(f"Created ConfigMap with data for {safe_key}")
             
             return True
             

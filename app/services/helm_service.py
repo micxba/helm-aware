@@ -139,20 +139,25 @@ class HelmService:
         repo_url = source.get('repoURL', '')
         path = source.get('path', None)
         chart = source.get('chart', None)
+        logger.debug(f"HELM DETECTION: repo_url={repo_url}, path={path}, chart={chart}")
 
         # 1. Must have a chart field
         if not chart:
+            logger.debug("HELM DETECTION: Rejected (no chart field)")
             return False
 
         # 2. Reject if path is present
         if path is not None:
+            logger.debug("HELM DETECTION: Rejected (has path field)")
             return False
 
         # 3. Reject if repoURL is a Git repo
         if self._is_git_repository(repo_url):
+            logger.debug(f"HELM DETECTION: Rejected (repo_url is a Git repo): {repo_url}")
             return False
 
         # 4. Otherwise, it's a Helm chart
+        logger.debug("HELM DETECTION: Accepted as Helm chart")
         return True
     
     def _has_helm_fields_in_source(self, source):
@@ -345,16 +350,18 @@ class HelmService:
         return False
     
     def _is_git_repository(self, repo_url):
-        """Check if the repository URL is a Git repository"""
         if not repo_url:
+            logger.debug("GIT DETECTION: repo_url is empty")
             return False
         repo_url = repo_url.lower()
-        return (
+        is_git = (
             repo_url.startswith('git@') or
             repo_url.startswith('git://') or
             repo_url.endswith('.git') or
             ((repo_url.startswith('http://') or repo_url.startswith('https://')) and repo_url.endswith('.git'))
         )
+        logger.debug(f"GIT DETECTION: repo_url={repo_url}, is_git={is_git}")
+        return is_git
     
     def get_available_versions(self, chart_info):
         """Get available versions for a Helm chart (with caching)"""
