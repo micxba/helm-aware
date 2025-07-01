@@ -136,29 +136,10 @@ class HelmService:
         return chart_info
     
     def _is_helm_chart(self, source, has_helm_config=False):
-        repo_url = source.get('repoURL', '')
-        path = source.get('path', None)
-        chart = source.get('chart', None)
-        logger.debug(f"HELM DETECTION: repo_url={repo_url}, path={path}, chart={chart}")
-
-        # 1. Must have a chart field
-        if not chart:
-            logger.debug("HELM DETECTION: Rejected (no chart field)")
-            return False
-
-        # 2. Reject if path is present
-        if path is not None:
-            logger.debug("HELM DETECTION: Rejected (has path field)")
-            return False
-
-        # 3. Reject if repoURL is a Git repo
-        if self._is_git_repository(repo_url):
-            logger.debug(f"HELM DETECTION: Rejected (repo_url is a Git repo): {repo_url}")
-            return False
-
-        # 4. Otherwise, it's a Helm chart
-        logger.debug("HELM DETECTION: Accepted as Helm chart")
-        return True
+        # Only allow if 'chart' or 'helm' is present in the source
+        if 'chart' in source or 'helm' in source:
+            return True
+        return False
     
     def _has_helm_fields_in_source(self, source):
         """Check if the source has Helm-specific fields"""
