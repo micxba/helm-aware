@@ -52,6 +52,8 @@ def get_applications():
         start_time = time.time()
         
         total_charts = 0
+        filtered_applications = []
+        filtered_application_sets = []
         
         # Process applications
         logger.info(f"Processing {len(applications)} applications...")
@@ -68,6 +70,9 @@ def get_applications():
             for chart in app['helm_charts']:
                 chart['available_versions'] = []
                 chart['version_fetch_status'] = 'pending'
+            
+            if chart_count > 0:
+                filtered_applications.append(app)
         
         # Process application sets
         logger.info(f"Processing {len(application_sets)} application sets...")
@@ -84,6 +89,9 @@ def get_applications():
             for chart in app_set['helm_charts']:
                 chart['available_versions'] = []
                 chart['version_fetch_status'] = 'pending'
+            
+            if chart_count > 0:
+                filtered_application_sets.append(app_set)
         
         analysis_time = time.time() - start_time
         logger.info(f"✅ Local analysis complete: {total_charts} total charts found in {analysis_time:.2f}s")
@@ -91,8 +99,8 @@ def get_applications():
         # Step 4: Return local data immediately
         logger.info("Step 4: Returning local data to frontend...")
         response_data = {
-            'applications': applications,
-            'application_sets': application_sets,
+            'applications': filtered_applications,
+            'application_sets': filtered_application_sets,
             'local_analysis_complete': True,
             'total_charts_found': total_charts
         }

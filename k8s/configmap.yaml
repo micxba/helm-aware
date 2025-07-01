@@ -12,8 +12,8 @@ data:
   DEBUG: "false"
   
   # Logging configuration - set to DEBUG for troubleshooting
-  LOG_LEVEL: "INFO"
-  #LOG_LEVEL: "DEBUG"
+  #3LOG_LEVEL: "INFO"
+  LOG_LEVEL: "DEBUG"
   
   # Kubernetes configuration
   KUBERNETES_SERVICE_HOST: ""
