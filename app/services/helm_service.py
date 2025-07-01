@@ -348,42 +348,13 @@ class HelmService:
         """Check if the repository URL is a Git repository"""
         if not repo_url:
             return False
-        
-        # Git URL patterns - more comprehensive
-        git_patterns = [
-            r'\.git$',  # Ends with .git
-            r'^git@',   # SSH Git URL (git@github.com:user/repo.git)
-            r'^git://', # Git protocol
-            r'^ssh://', # SSH protocol
-            r'github\.com',  # GitHub
-            r'gitlab\.com',  # GitLab
-            r'gitlab\.',     # GitLab instances
-            r'bitbucket\.org',  # Bitbucket
-            r'bitbucket\.',     # Bitbucket instances
-            r'gitea\.',  # Gitea
-            r'gogs\.',   # Gogs
-            r'azure\.com.*dev\.azure\.com',  # Azure DevOps
-            r'dev\.azure\.com',  # Azure DevOps
-            r'visualstudio\.com',  # Azure DevOps
-            r'codecommit\.',  # AWS CodeCommit
-            r'gerrit\.',  # Gerrit
-            r'phabricator\.',  # Phabricator
-            r'gitolite\.',  # Gitolite
-            r'gogs\.',  # Gogs
-            r'gitea\.',  # Gitea
-            r'codeberg\.org',  # Codeberg
-            r'sourceforge\.net',  # SourceForge
-            r'git\.',  # Generic git subdomain
-            r'\.git$',  # Ends with .git
-            r'^https?://.*\.git$',  # HTTPS/HTTP ending with .git
-        ]
-        
-        for pattern in git_patterns:
-            if re.search(pattern, repo_url, re.IGNORECASE):
-                logger.debug(f"Git repository pattern '{pattern}' matched: {repo_url}")
-                return True
-        
-        return False
+        repo_url = repo_url.lower()
+        return (
+            repo_url.startswith('git@') or
+            repo_url.startswith('git://') or
+            repo_url.endswith('.git') or
+            ((repo_url.startswith('http://') or repo_url.startswith('https://')) and repo_url.endswith('.git'))
+        )
     
     def get_available_versions(self, chart_info):
         """Get available versions for a Helm chart (with caching)"""
