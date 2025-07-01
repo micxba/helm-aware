@@ -137,16 +137,16 @@ class HelmService:
     
     def _is_helm_chart(self, source, has_helm_config=False):
         repo_url = source.get('repoURL', '')
-        path = source.get('path', '')
-        chart = source.get('chart', '')
+        path = source.get('path', None)
+        chart = source.get('chart', None)
         helm_block = source.get('helm', {})
 
-        # 1. Reject Git repos
-        if self._is_git_repository(repo_url):
+        # 1. Reject if path is present
+        if path is not None:
             return False
 
-        # 2. Reject if path is present
-        if path:
+        # 2. Reject if repoURL is a Git repo
+        if self._is_git_repository(repo_url):
             return False
 
         # 3. Accept only if chart and valid helm block
@@ -154,10 +154,11 @@ class HelmService:
             if any(k in helm_block for k in ['valueFiles', 'valueObject', 'parameters']):
                 return True
 
-        # 4. Accept if parent has valid helm config (releaseName or values)
+        # 4. Accept if parent has valid helm config (releaseName or values) and chart
         if has_helm_config and chart:
             return True
 
+        # 5. Otherwise, not a Helm chart
         return False
     
     def _has_helm_fields_in_source(self, source):
