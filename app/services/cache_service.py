@@ -114,13 +114,13 @@ class CacheService:
                             namespace=self.namespace,
                             body=configmap
                         )
-                        logger.debug(f"Updated ConfigMap with data for {safe_key}")
+                        logger.info(f"ConfigMap updated for key: {safe_key}")
                     else:
                         self.v1_api.create_namespaced_config_map(
                             namespace=self.namespace,
                             body=configmap
                         )
-                        logger.debug(f"Created ConfigMap with data for {safe_key}")
+                        logger.info(f"ConfigMap created for key: {safe_key}")
                     return True
                 except ApiException as e:
                     if e.status == 409 and attempt < max_retries - 1:

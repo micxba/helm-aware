@@ -45,19 +45,25 @@ class HelmService:
         logger.debug("Analyzing application sources...")
         helm_charts = []
         spec = application.get('spec', {})
+        app_name = application.get('metadata', {}).get('name', 'unknown')
         
         # Single source
-        if 'source' in spec and self._is_helm_chart(spec['source']):
-            chart_info = self._extract_helm_info(spec['source'])
-            if chart_info:
-                helm_charts.append(chart_info)
-                logger.debug(f"Added Helm chart: {chart_info['chart_name']}")
+        if 'source' in spec:
+            is_helm = self._is_helm_chart(spec['source'])
+            logger.info(f"App {app_name} source (single): is_helm={is_helm} keys={list(spec['source'].keys())}")
+            if is_helm:
+                chart_info = self._extract_helm_info(spec['source'])
+                if chart_info:
+                    helm_charts.append(chart_info)
+                    logger.debug(f"Added Helm chart: {chart_info['chart_name']}")
         
         # Multiple sources
         if 'sources' in spec:
             logger.debug(f"Found {len(spec['sources'])} sources, analyzing each...")
             for i, source in enumerate(spec['sources']):
-                if self._is_helm_chart(source):
+                is_helm = self._is_helm_chart(source)
+                logger.info(f"App {app_name} source {i}: is_helm={is_helm} keys={list(source.keys())}")
+                if is_helm:
                     logger.debug(f"Analyzing source {i+1}/{len(spec['sources'])} (Helm chart detected)...")
                     chart_info = self._extract_helm_info(source)
                     if chart_info:
@@ -72,19 +78,25 @@ class HelmService:
         spec = application_set.get('spec', {})
         template = spec.get('template', {})
         template_spec = template.get('spec', {})
+        appset_name = application_set.get('metadata', {}).get('name', 'unknown')
         
         # Single source in template
-        if 'source' in template_spec and self._is_helm_chart(template_spec['source']):
-            chart_info = self._extract_helm_info(template_spec['source'])
-            if chart_info:
-                helm_charts.append(chart_info)
-                logger.debug(f"Added Helm chart: {chart_info['chart_name']}")
+        if 'source' in template_spec:
+            is_helm = self._is_helm_chart(template_spec['source'])
+            logger.info(f"AppSet {appset_name} source (single): is_helm={is_helm} keys={list(template_spec['source'].keys())}")
+            if is_helm:
+                chart_info = self._extract_helm_info(template_spec['source'])
+                if chart_info:
+                    helm_charts.append(chart_info)
+                    logger.debug(f"Added Helm chart: {chart_info['chart_name']}")
         
         # Multiple sources in template
         if 'sources' in template_spec:
             logger.debug(f"Found {len(template_spec['sources'])} sources in template, analyzing each...")
             for i, source in enumerate(template_spec['sources']):
-                if self._is_helm_chart(source):
+                is_helm = self._is_helm_chart(source)
+                logger.info(f"AppSet {appset_name} source {i}: is_helm={is_helm} keys={list(source.keys())}")
+                if is_helm:
                     logger.debug(f"Analyzing template source {i+1}/{len(template_spec['sources'])} (Helm chart detected)...")
                     chart_info = self._extract_helm_info(source)
                     if chart_info:
