@@ -136,34 +136,28 @@ class HelmService:
         return chart_info
     
     def _is_helm_chart(self, source, has_helm_config=False):
-        """Determine if a source is a Helm chart - ONLY specific patterns allowed"""
-        logger.debug(f"Checking if source is Helm chart: {source}")
-        
         repo_url = source.get('repoURL', '')
-        chart = source.get('chart', '')
         path = source.get('path', '')
-        
-        # Early exit: If it's clearly a Git repository, it's not a Helm chart
+        chart = source.get('chart', '')
+        helm_block = source.get('helm', {})
+
+        # 1. Reject Git repos
         if self._is_git_repository(repo_url):
-            logger.debug(f"Git repository detected: {repo_url} - not a Helm chart")
             return False
-        
-        # Early exit: If it has a path field, it's likely a Git-based deployment (Kustomize, etc.)
+
+        # 2. Reject if path is present
         if path:
-            logger.debug(f"Path field found: {path} - indicates Git-based deployment, not Helm chart")
             return False
-        
-        # Rule 1: Check for Helm-specific fields in the source itself (ONLY specific patterns)
-        if self._has_valid_helm_fields_in_source(source):
-            logger.debug("Source has valid Helm-specific fields - is a Helm chart")
+
+        # 3. Accept only if chart and valid helm block
+        if chart and isinstance(helm_block, dict):
+            if any(k in helm_block for k in ['valueFiles', 'valueObject', 'parameters']):
+                return True
+
+        # 4. Accept if parent has valid helm config (releaseName or values)
+        if has_helm_config and chart:
             return True
-        
-        # Rule 2: Check for Helm configuration in the parent Application/ApplicationSet (ONLY specific patterns)
-        if has_helm_config:
-            logger.debug("Parent has valid Helm configuration - is a Helm chart")
-            return True
-        
-        logger.debug("Source does not meet strict Helm chart criteria")
+
         return False
     
     def _has_helm_fields_in_source(self, source):
