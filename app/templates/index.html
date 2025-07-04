@@ -646,7 +646,7 @@
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${chartName}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${currentVersion}</td>
                     <td class="px-6 py-4 whitespace-nowrap">
-                        ${this.renderVersionDropdown(availableVersions, currentVersion, fetchStatus, chart)}
+                        ${this.renderChartDropdown(chart)}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap">
                         ${this.renderStatusBadge(isUpdateAvailable, fetchStatus)}
@@ -656,24 +656,32 @@
                 tbody.appendChild(row);
             }
 
-            renderVersionDropdown(versions, currentVersion, fetchStatus, chart) {
-                if (fetchStatus === 'pending') {
-                    return '<span class="text-gray-400">Loading...</span>';
-                }
-                
-                if (fetchStatus === 'error') {
-                    return '<span class="text-red-400">Error loading</span>';
-                }
-                
-                if (fetchStatus === 'timeout') {
-                    return '<span class="text-yellow-400">Timeout</span>';
-                }
+            renderChartDropdown(chart) {
+                const chartKey = `${chart.repo_url}:${chart.chart_name}`;
+                const versions = chart.available_versions || [];
+                const currentVersion = chart.chart_version;
+                const fetchStatus = chart.version_fetch_status || 'success';
 
-                if (versions.length === 0) {
+                if (fetchStatus === 'pending') {
+                    return `
+                        <div class="flex items-center space-x-2">
+                            <span class="text-gray-400"><i class="fas fa-spinner fa-spin"></i> Loading versions...</span>
+                        </div>
+                    `;
+                }
+                if (fetchStatus === 'error') {
+                    return `
+                        <div class="flex items-center space-x-2">
+                            <span class="text-red-500">Error loading versions</span>
+                            <i class="fas fa-sync-alt refresh-icon" onclick="app.refreshChartVersions('${chartKey}')" title="Retry"></i>
+                        </div>
+                    `;
+                }
+                if (!versions.length) {
                     return `
                         <div class="flex items-center space-x-2">
                             <span class="text-gray-400">Click refresh to load versions</span>
-                            <i class="fas fa-sync-alt refresh-icon" onclick="app.refreshChartVersions('${chart?.repo_url}:${chart?.chart_name}')" title="Refresh versions"></i>
+                            <i class="fas fa-sync-alt refresh-icon" onclick="app.refreshChartVersions('${chartKey}')" title="Refresh versions"></i>
                         </div>
                     `;
                 }
@@ -692,47 +700,70 @@
 
                 return `
                     <div class="flex items-center space-x-2">
-                        <select class="version-dropdown ${isUpdateAvailable ? 'border-yellow-300 bg-yellow-50' : ''}" 
+                        <select class="version-dropdown ${isUpdateAvailable ? 'border-yellow-300 bg-yellow-50' : ''}"
                                 ${isUpdateAvailable ? 'title="Update available"' : ''}>
                             ${options}
                         </select>
-                        <i class="fas fa-sync-alt refresh-icon" onclick="app.refreshChartVersions('${chart?.repo_url}:${chart?.chart_name}')" title="Refresh versions"></i>
+                        <i class="fas fa-sync-alt refresh-icon" onclick="app.refreshChartVersions('${chartKey}')" title="Refresh versions"></i>
                     </div>
                 `;
             }
 
             async refreshChartVersions(chartKey) {
+                // Set status to pending for this chart and re-render
+                this.setChartStatus(chartKey, 'pending');
+                this.renderData();
                 try {
-                    // Parse chart key to get repo_url and chart_name
-                    const [repo_url, chart_name] = chartKey.split(':');
-                    const chart_info = { repo_url, chart_name };
-                    
                     // Use the HelmService to refresh versions (this will update the cache)
-                    const response = await fetch('/api/fetch-all-versions', {
+                    const response = await fetch(`/api/refresh-versions/${encodeURIComponent(chartKey)}`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ charts: [chart_info] })
+                        }
                     });
 
                     if (!response.ok) {
+                        this.setChartStatus(chartKey, 'error');
+                        this.renderData();
                         throw new Error(`HTTP error! status: ${response.status}`);
                     }
 
                     const data = await response.json();
-                    
-                    if (data.results && data.results.length > 0) {
-                        const result = data.results[0];
-                        // Update the chart data
-                        this.updateChartVersions(chartKey, result.versions);
-                        this.renderData(); // Re-render to show updated data
+                    if (data.success && data.versions) {
+                        this.updateChartVersions(chartKey, data.versions);
+                        this.setChartStatus(chartKey, 'success');
+                        this.renderData();
                     } else {
+                        this.setChartStatus(chartKey, 'error');
+                        this.renderData();
                         console.error('Error refreshing versions: No results returned');
                     }
                 } catch (error) {
+                    this.setChartStatus(chartKey, 'error');
+                    this.renderData();
                     console.error('Error refreshing chart versions:', error);
                 }
+            }
+
+            setChartStatus(chartKey, status) {
+                // Update applications
+                this.data.applications.forEach(app => {
+                    app.helm_charts.forEach(chart => {
+                        const key = `${chart.repo_url}:${chart.chart_name}`;
+                        if (key === chartKey) {
+                            chart.version_fetch_status = status;
+                        }
+                    });
+                });
+                // Update application sets
+                this.data.application_sets.forEach(appSet => {
+                    appSet.helm_charts.forEach(chart => {
+                        const key = `${chart.repo_url}:${chart.chart_name}`;
+                        if (key === chartKey) {
+                            chart.version_fetch_status = status;
+                        }
+                    });
+                });
             }
 
             updateChartVersions(chartKey, versions) {
