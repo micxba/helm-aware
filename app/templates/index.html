@@ -337,59 +337,54 @@
 
             async refreshAllVersions() {
                 this.showProgress();
-                
                 try {
-                    // Collect all charts that need versions
+                    // Step 1: Clear the cache first
+                    this.updateProgressMessage('Clearing cache...');
+                    const clearResp = await fetch('/api/cache/clear', { method: 'POST' });
+                    if (!clearResp.ok) {
+                        throw new Error('Failed to clear cache');
+                    }
+                    const clearData = await clearResp.json();
+                    if (!clearData.success) {
+                        throw new Error('Failed to clear cache: ' + (clearData.message || 'Unknown error'));
+                    }
+
+                    // Step 2: Collect all charts that need versions
                     const charts = [];
                     let chartId = 0;
-
-                    // Add charts from applications
                     this.data.applications.forEach(app => {
                         app.helm_charts.forEach(chart => {
                             chart.chart_id = chartId++;
                             charts.push(chart);
                         });
                     });
-
-                    // Add charts from application sets
                     this.data.application_sets.forEach(appSet => {
                         appSet.helm_charts.forEach(chart => {
                             chart.chart_id = chartId++;
                             charts.push(chart);
                         });
                     });
-
                     if (charts.length === 0) {
                         this.hideProgress();
                         return;
                     }
-
                     this.updateProgressMessage(`Refreshing versions for ${charts.length} charts...`);
-                    
                     // Fetch versions in batches
                     const batchSize = 5;
                     const results = [];
-                    
                     for (let i = 0; i < charts.length; i += batchSize) {
                         const batch = charts.slice(i, i + batchSize);
                         const progress = ((i + batchSize) / charts.length) * 100;
                         this.updateVersionProgress(progress);
                         this.updateVersionProgressText(`${Math.min(i + batchSize, charts.length)} / ${charts.length} charts processed`);
-                        
                         // Fetch versions for this batch
                         const batchResults = await this.fetchVersionsForBatch(batch);
                         results.push(...batchResults);
-                        
-                        // Small delay to prevent overwhelming the server
                         await new Promise(resolve => setTimeout(resolve, 100));
                     }
-
                     // Update the data with fetched versions
                     this.updateDataWithVersions(results);
-                    
-                    // Re-render to show versions
                     this.renderData();
-                    
                 } catch (error) {
                     console.error('Error refreshing versions:', error);
                     this.updateProgressMessage('Error refreshing versions: ' + error.message);
