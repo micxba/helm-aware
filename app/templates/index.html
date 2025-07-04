@@ -356,17 +356,14 @@
                         app.helm_charts.forEach(chart => {
                             chart.chart_id = chartId++;
                             charts.push(chart);
-                            chart.version_fetch_status = 'pending'; // Set status to pending for UI
                         });
                     });
                     this.data.application_sets.forEach(appSet => {
                         appSet.helm_charts.forEach(chart => {
                             chart.chart_id = chartId++;
                             charts.push(chart);
-                            chart.version_fetch_status = 'pending'; // Set status to pending for UI
                         });
                     });
-                    this.renderData(); // Show all as loading
                     if (charts.length === 0) {
                         this.hideProgress();
                         return;
@@ -381,7 +378,7 @@
                         this.updateVersionProgress(progress);
                         this.updateVersionProgressText(`${Math.min(i + batchSize, charts.length)} / ${charts.length} charts processed`);
                         // Fetch versions for this batch
-                        const batchResults = await this.fetchVersionsForBatch(batch, true);
+                        const batchResults = await this.fetchVersionsForBatch(batch);
                         results.push(...batchResults);
                         await new Promise(resolve => setTimeout(resolve, 100));
                     }
@@ -459,14 +456,14 @@
                 }
             }
             
-            async fetchVersionsForBatch(charts, forceRefresh = false) {
+            async fetchVersionsForBatch(charts) {
                 try {
                     const response = await fetch('/api/fetch-all-versions', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
                         },
-                        body: JSON.stringify({ charts, force_refresh: forceRefresh })
+                        body: JSON.stringify({ charts })
                     });
 
                     if (!response.ok) {

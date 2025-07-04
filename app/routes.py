@@ -267,9 +267,8 @@ def fetch_all_versions():
     try:
         data = request.get_json()
         charts = data.get('charts', [])
-        force_refresh = data.get('force_refresh', False)
         
-        logger.info(f"Received {len(charts)} charts to fetch versions for (force_refresh={force_refresh})")
+        logger.info(f"Received {len(charts)} charts to fetch versions for")
         
         results = []
         helm_service = HelmService()
@@ -279,10 +278,7 @@ def fetch_all_versions():
             future_to_chart = {}
             
             for chart in charts:
-                if force_refresh:
-                    future = executor.submit(helm_service.refresh_versions, chart)
-                else:
-                    future = executor.submit(helm_service.get_available_versions, chart)
+                future = executor.submit(helm_service.get_available_versions, chart)
                 future_to_chart[future] = chart
             
             # Wait for completion with timeout
